@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QT
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
+from uuid import uuid4
 import keyboard
 
 @dataclass
@@ -85,10 +86,6 @@ class HighlightRecorder(QWidget):
         self.highlights_view.itemDoubleClicked.connect(self.edit_highlight_inline)
         layout.addWidget(self.highlights_view)
 
-        self.match_display_button = QPushButton('현재 매치 메모 보기', self)
-        self.match_display_button.clicked.connect(self.display_current_match_highlights)
-        layout.addWidget(self.match_display_button)
-
         self.setLayout(layout)
         self.setFixedSize(400, 880)
 
@@ -151,7 +148,12 @@ class HighlightRecorder(QWidget):
                 memo = self.memo_input.text() or '하이라이트'
                 h = Highlight(raw_start, raw_end, offset_start, offset_end, memo)
                 self.current_highlight_list().append(h)
-                self.highlights_view.addItem(f"[Match {self.match}] {h.to_display_string()}")
+                # match 헤더가 마지막 줄이 아니라면 출력
+                if not any(self.highlights_view.item(i).text() == f"=== Match {self.match} ==="
+                       for i in range(self.highlights_view.count())):
+                    self.highlights_view.addItem(f"=== Match {self.match} ===")
+
+                self.highlights_view.addItem(h.to_display_string())
                 self.undo_stack.append(h)
                 self.highlight_start_time = None
                 self.memo_input.clear()
@@ -176,6 +178,7 @@ class HighlightRecorder(QWidget):
         self.match += 1
         self.reset_timer()
         self.highlights_by_match[self.match] = []
+        self.highlights_view.addItem(f"=== Match {self.match} ===")
         self.status_label.setText(f"=== Match {self.match} ===")
 
     def edit_match_number(self):
@@ -215,36 +218,47 @@ class HighlightRecorder(QWidget):
 
     def save_highlights(self):
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "메모 저장", "highlights.txt", "Text Files (*.txt)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "메모 저장", "highlights.txt", "Text Files (*.txt)", options=options
+        )
         if file_path:
             base = os.path.splitext(file_path)[0]
-            with open(base + '_raw.txt', 'w', encoding='utf-8') as f:
+
+            # 메모 텍스트 저장
+            with open(base + '_memo.txt', 'w', encoding='utf-8') as f:
                 for m, lst in self.highlights_by_match.items():
+                    f.write(f"=== Match {m} ===\n\n")
                     for h in lst:
-                        f.write(h.to_raw_string() + '\n')
-            with open(base + '_offset.txt', 'w', encoding='utf-8') as f:
-                for m, lst in self.highlights_by_match.items():
-                    for h in lst:
-                        f.write(h.to_display_string() + '\n')
-            root = Element('xmeml')
-            root.set('version', '5')
-            project = SubElement(root, 'project')
-            name = SubElement(project, 'name')
-            name.text = '하이라이트 마커'
-            sequence = SubElement(project, 'sequence')
-            SubElement(sequence, 'name').text = f'Match {self.match}'
-            SubElement(sequence, 'duration').text = '0'
+                        f.write(h.to_display_string() + '\n\n')
+
+            # 매치별 XML 저장
             for m, lst in self.highlights_by_match.items():
+                root = Element("xmeml")
+                root.set("version", "4")
+
+                sequence = SubElement(root, "sequence", {"id": "sequence"})
+                SubElement(sequence, "uuid").text = str(uuid4())
+                SubElement(sequence, "duration").text = "0"
+
+                rate = SubElement(sequence, "rate")
+                SubElement(rate, "timebase").text = "60"
+                SubElement(rate, "ntsc").text = "FALSE"
+
+                SubElement(sequence, "name").text = f"Marker - (Match {m})"
+
                 for h in lst:
-                    marker = SubElement(sequence, 'marker')
-                    SubElement(marker, 'in').text = str(int(h.offset_start * 60))
-                    SubElement(marker, 'out').text = str(int(h.offset_end * 60))
-                    SubElement(marker, 'name').text = h.memo
-                    SubElement(marker, 'comment').text = h.memo
-            xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
-            with open(base + '_markers.xml', 'w', encoding='utf-8') as f:
-                f.write(xml_str)
-            self.saved = True
+                    marker = SubElement(sequence, "marker")
+                    SubElement(marker, "comment").text = h.memo
+                    SubElement(marker, "name").text = h.memo
+                    SubElement(marker, "in").text = str(int(h.offset_start * 60))
+                    SubElement(marker, "out").text = "-1"
+                    SubElement(marker, "pproColor").text = "4294741314"
+
+                xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
+                xml_path = f"{base}_markers_match_{m}.xml"
+                with open(xml_path, "w", encoding="utf-8") as f:
+                    f.write(xml_str)
+
 
     def auto_save_highlights(self):
         if self.highlights_by_match:
@@ -254,10 +268,6 @@ class HighlightRecorder(QWidget):
                     for h in lst:
                         f.write(h.to_display_string() + '\n')
 
-    def display_current_match_highlights(self):
-        self.highlights_view.clear()
-        for h in self.current_highlight_list():
-            self.highlights_view.addItem(f"[Match {self.match}] {h.to_display_string()}")
 
     def closeEvent(self, event):
         if any(self.highlights_by_match.values()) and not self.saved:

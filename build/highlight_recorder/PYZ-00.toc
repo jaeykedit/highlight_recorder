@@ -1,5 +1,4 @@
-('C:\\Users\\admin\\Downloads\\pubg '
- 'memo\\build\\highlight_recorder\\PYZ-00.pyz',
+('C:\\Users\\admin\\Documents\\highlight_recorder\\build\\highlight_recorder\\PYZ-00.pyz',
  [('PyQt5',
    'C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyQt5\\__init__.py',
    'PYMODULE'),
@@ -434,6 +433,9 @@
    'PYMODULE'),
   ('urllib.response',
    'C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\urllib\\response.py',
+   'PYMODULE'),
+  ('uuid',
+   'C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\uuid.py',
    'PYMODULE'),
   ('xml',
    'C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\xml\\__init__.py',
