@@ -3,13 +3,49 @@
   <project>
     <name>하이라이트 마커</name>
     <sequence>
-      <name>Match 1</name>
+      <name>Match 3</name>
       <duration>0</duration>
       <marker>
-        <in>0</in>
-        <out>180</out>
-        <name>31413414</name>
-        <comment>31413414</comment>
+        <in>180</in>
+        <out>300</out>
+        <name>21323213</name>
+        <comment>21323213</comment>
+      </marker>
+      <marker>
+        <in>420</in>
+        <out>480</out>
+        <name>123213</name>
+        <comment>123213</comment>
+      </marker>
+      <marker>
+        <in>540</in>
+        <out>600</out>
+        <name>1231313</name>
+        <comment>1231313</comment>
+      </marker>
+      <marker>
+        <in>180</in>
+        <out>240</out>
+        <name>231231323</name>
+        <comment>231231323</comment>
+      </marker>
+      <marker>
+        <in>180</in>
+        <out>240</out>
+        <name>141231</name>
+        <comment>141231</comment>
+      </marker>
+      <marker>
+        <in>300</in>
+        <out>300</out>
+        <name>하이라이트</name>
+        <comment>하이라이트</comment>
+      </marker>
+      <marker>
+        <in>300</in>
+        <out>300</out>
+        <name>하이라이트</name>
+        <comment>하이라이트</comment>
       </marker>
     </sequence>
   </project>

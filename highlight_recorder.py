@@ -1,9 +1,9 @@
-# highlight_recorder.py (최신 전체 코드)
+# highlight_recorder.py (매치별 메모 구분 추가)
 import sys
 import time
 import os
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Dict
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit,
@@ -41,7 +41,7 @@ class HighlightRecorder(QWidget):
         self.auto_save_timer.timeout.connect(self.auto_save_highlights)
         self.highlight_start_time = None
         self.video_offset_seconds = 0
-        self.highlights: List[Highlight] = []
+        self.highlights_by_match: Dict[int, List[Highlight]] = {1: []}
         self.undo_stack: List[Highlight] = []
 
     def initUI(self):
@@ -85,6 +85,10 @@ class HighlightRecorder(QWidget):
         self.highlights_view.itemDoubleClicked.connect(self.edit_highlight_inline)
         layout.addWidget(self.highlights_view)
 
+        self.match_display_button = QPushButton('현재 매치 메모 보기', self)
+        self.match_display_button.clicked.connect(self.display_current_match_highlights)
+        layout.addWidget(self.match_display_button)
+
         self.setLayout(layout)
         self.setFixedSize(400, 880)
 
@@ -93,12 +97,14 @@ class HighlightRecorder(QWidget):
 
         keyboard.add_hotkey('f1', self.record_highlight)
 
-        # 단축키 등록
         undo_shortcut = QShortcut(QKeySequence('Ctrl+Z'), self)
         undo_shortcut.activated.connect(self.undo_last_highlight)
 
         delete_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self)
         delete_shortcut.activated.connect(self.delete_highlight)
+
+    def current_highlight_list(self):
+        return self.highlights_by_match.setdefault(self.match, [])
 
     def start_match(self):
         if not self.running:
@@ -144,8 +150,8 @@ class HighlightRecorder(QWidget):
                 offset_end = raw_end + self.video_offset_seconds
                 memo = self.memo_input.text() or '하이라이트'
                 h = Highlight(raw_start, raw_end, offset_start, offset_end, memo)
-                self.highlights.append(h)
-                self.highlights_view.addItem(h.to_display_string())
+                self.current_highlight_list().append(h)
+                self.highlights_view.addItem(f"[Match {self.match}] {h.to_display_string()}")
                 self.undo_stack.append(h)
                 self.highlight_start_time = None
                 self.memo_input.clear()
@@ -153,8 +159,8 @@ class HighlightRecorder(QWidget):
                 self.saved = False
 
     def undo_last_highlight(self):
-        if self.highlights:
-            self.highlights.pop()
+        if self.current_highlight_list():
+            self.current_highlight_list().pop()
             self.highlights_view.takeItem(self.highlights_view.count() - 1)
             self.saved = False
 
@@ -162,19 +168,21 @@ class HighlightRecorder(QWidget):
         selected_item = self.highlights_view.currentItem()
         if selected_item:
             index = self.highlights_view.row(selected_item)
-            del self.highlights[index]
+            del self.current_highlight_list()[index]
             self.highlights_view.takeItem(index)
             self.saved = False
 
     def new_match(self):
         self.match += 1
         self.reset_timer()
+        self.highlights_by_match[self.match] = []
         self.status_label.setText(f"=== Match {self.match} ===")
 
     def edit_match_number(self):
         new_match, ok = QInputDialog.getInt(self, '매치 번호 수정', '새 매치 번호를 입력하세요:', value=self.match, min=1)
         if ok:
             self.match = new_match
+            self.highlights_by_match.setdefault(self.match, [])
             self.status_label.setText(f"=== Match {self.match} ===")
 
     def edit_match_time(self):
@@ -202,7 +210,7 @@ class HighlightRecorder(QWidget):
         new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=item.text())
         if ok and new_text:
             index = self.highlights_view.row(item)
-            self.highlights_view.item(index).setText(new_text)
+            item.setText(new_text)
             self.saved = False
 
     def save_highlights(self):
@@ -211,11 +219,13 @@ class HighlightRecorder(QWidget):
         if file_path:
             base = os.path.splitext(file_path)[0]
             with open(base + '_raw.txt', 'w', encoding='utf-8') as f:
-                for h in self.highlights:
-                    f.write(h.to_raw_string() + '\n')
+                for m, lst in self.highlights_by_match.items():
+                    for h in lst:
+                        f.write(h.to_raw_string() + '\n')
             with open(base + '_offset.txt', 'w', encoding='utf-8') as f:
-                for h in self.highlights:
-                    f.write(h.to_display_string() + '\n')
+                for m, lst in self.highlights_by_match.items():
+                    for h in lst:
+                        f.write(h.to_display_string() + '\n')
             root = Element('xmeml')
             root.set('version', '5')
             project = SubElement(root, 'project')
@@ -224,26 +234,33 @@ class HighlightRecorder(QWidget):
             sequence = SubElement(project, 'sequence')
             SubElement(sequence, 'name').text = f'Match {self.match}'
             SubElement(sequence, 'duration').text = '0'
-            for h in self.highlights:
-                m = SubElement(sequence, 'marker')
-                SubElement(m, 'in').text = str(int(h.offset_start * 60))
-                SubElement(m, 'out').text = str(int(h.offset_end * 60))
-                SubElement(m, 'name').text = h.memo
-                SubElement(m, 'comment').text = h.memo
+            for m, lst in self.highlights_by_match.items():
+                for h in lst:
+                    marker = SubElement(sequence, 'marker')
+                    SubElement(marker, 'in').text = str(int(h.offset_start * 60))
+                    SubElement(marker, 'out').text = str(int(h.offset_end * 60))
+                    SubElement(marker, 'name').text = h.memo
+                    SubElement(marker, 'comment').text = h.memo
             xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
             with open(base + '_markers.xml', 'w', encoding='utf-8') as f:
                 f.write(xml_str)
             self.saved = True
 
     def auto_save_highlights(self):
-        if self.highlights:
+        if self.highlights_by_match:
             os.makedirs('autosaves', exist_ok=True)
             with open('autosaves/highlights_autosave.txt', 'w', encoding='utf-8') as f:
-                for h in self.highlights:
-                    f.write(h.to_display_string() + '\n')
+                for m, lst in self.highlights_by_match.items():
+                    for h in lst:
+                        f.write(h.to_display_string() + '\n')
+
+    def display_current_match_highlights(self):
+        self.highlights_view.clear()
+        for h in self.current_highlight_list():
+            self.highlights_view.addItem(f"[Match {self.match}] {h.to_display_string()}")
 
     def closeEvent(self, event):
-        if self.highlights and not self.saved:
+        if any(self.highlights_by_match.values()) and not self.saved:
             reply = QMessageBox.question(self, '종료 확인',
                                          '하이라이트가 저장되지 않았습니다. 저장 후 종료하시겠습니까?',
                                          QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
