@@ -1,4 +1,3 @@
-# highlight_recorder.py (매치별 메모 구분 추가)
 import sys
 import time
 import os
@@ -18,12 +17,10 @@ import keyboard
 class Highlight:
     raw_start: int
     raw_end: int
-    offset_start: int
-    offset_end: int
     memo: str
 
     def to_display_string(self):
-        return f"{self.offset_start//60:02}:{self.offset_start%60:02}~{self.offset_end//60:02}:{self.offset_end%60:02}, {self.memo}"
+        return f"{self.raw_start//60:02}:{self.raw_start%60:02}~{self.raw_end//60:02}:{self.raw_end%60:02}, {self.memo}"
 
     def to_raw_string(self):
         return f"{self.raw_start//60:02}:{self.raw_start%60:02}~{self.raw_end//60:02}:{self.raw_end%60:02}, {self.memo}"
@@ -41,9 +38,7 @@ class HighlightRecorder(QWidget):
         self.auto_save_timer = QTimer()
         self.auto_save_timer.timeout.connect(self.auto_save_highlights)
         self.highlight_start_time = None
-        self.video_offset_seconds = 0
         self.highlights_by_match: Dict[int, List[Highlight]] = {1: []}
-        self.undo_stack: List[Highlight] = []
 
     def initUI(self):
         self.setWindowTitle('하이라이트 메모 프로그램')
@@ -73,7 +68,6 @@ class HighlightRecorder(QWidget):
             ('새 매치', self.new_match),
             ('매치 번호 수정', self.edit_match_number),
             ('매치 시간 수정', self.edit_match_time),
-            ('영상 오프셋 설정', self.set_video_offset),
             ('하이라이트 삭제', self.delete_highlight),
             ('메모 저장', self.save_highlights)
         ]
@@ -93,9 +87,6 @@ class HighlightRecorder(QWidget):
         self.timer.timeout.connect(self.update_timer)
 
         keyboard.add_hotkey('f1', self.record_highlight)
-
-        undo_shortcut = QShortcut(QKeySequence('Ctrl+Z'), self)
-        undo_shortcut.activated.connect(self.undo_last_highlight)
 
         delete_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self)
         delete_shortcut.activated.connect(self.delete_highlight)
@@ -143,36 +134,48 @@ class HighlightRecorder(QWidget):
             else:
                 raw_start = self.highlight_start_time
                 raw_end = self.elapsed_time
-                offset_start = raw_start + self.video_offset_seconds
-                offset_end = raw_end + self.video_offset_seconds
                 memo = self.memo_input.text() or '하이라이트'
-                h = Highlight(raw_start, raw_end, offset_start, offset_end, memo)
+                h = Highlight(raw_start, raw_end, memo)
                 self.current_highlight_list().append(h)
-                # match 헤더가 마지막 줄이 아니라면 출력
+                print(f"Recorded highlight: raw_start={raw_start}, raw_end={raw_end}, memo={memo}")  # 디버깅 로그
                 if not any(self.highlights_view.item(i).text() == f"=== Match {self.match} ==="
-                       for i in range(self.highlights_view.count())):
+                           for i in range(self.highlights_view.count())):
                     self.highlights_view.addItem(f"=== Match {self.match} ===")
-
                 self.highlights_view.addItem(h.to_display_string())
-                self.undo_stack.append(h)
                 self.highlight_start_time = None
                 self.memo_input.clear()
                 self.status_label.setText("")
                 self.saved = False
 
-    def undo_last_highlight(self):
-        if self.current_highlight_list():
-            self.current_highlight_list().pop()
-            self.highlights_view.takeItem(self.highlights_view.count() - 1)
-            self.saved = False
-
     def delete_highlight(self):
         selected_item = self.highlights_view.currentItem()
         if selected_item:
-            index = self.highlights_view.row(selected_item)
-            del self.current_highlight_list()[index]
-            self.highlights_view.takeItem(index)
-            self.saved = False
+            selected_index_in_view = self.highlights_view.row(selected_item)
+            highlight_list = self.current_highlight_list()
+            actual_highlight_index = -1
+            highlight_counter = 0
+
+            for i in range(self.highlights_view.count()):
+                if not self.highlights_view.item(i).text().startswith("==="):
+                    if i == selected_index_in_view:
+                        actual_highlight_index = highlight_counter
+                        break
+                    highlight_counter += 1
+
+            if 0 <= actual_highlight_index < len(highlight_list):
+                try:
+                    del highlight_list[actual_highlight_index]
+                    item = self.highlights_view.takeItem(selected_index_in_view)
+                    if item:
+                        self.saved = False
+                except IndexError:
+                    QMessageBox.warning(self, "삭제 오류", "선택된 하이라이트 삭제 중 (내부 리스트 인덱스 오류).")
+                except Exception as e:
+                    QMessageBox.critical(self, "삭제 오류", f"하이라이트 삭제 중 예기치 않은 오류:\n{e}")
+            else:
+                QMessageBox.warning(self, "삭제 오류", "선택된 하이라이트가 유효하지 않거나 찾을 수 없습니다.")
+        else:
+            QMessageBox.information(self, "알림", "삭제할 하이라이트를 먼저 선택해주세요.")
 
     def new_match(self):
         self.match += 1
@@ -199,16 +202,6 @@ class HighlightRecorder(QWidget):
                 except ValueError:
                     QMessageBox.warning(self, '입력 오류', '올바른 형식(MM:SS)으로 입력하세요.')
 
-    def set_video_offset(self):
-        text, ok = QInputDialog.getText(self, '영상 오프셋 설정', '영상 상의 시작 시간 (MM:SS):')
-        if ok and text:
-            try:
-                m, s = map(int, text.split(':'))
-                self.video_offset_seconds = m * 60 + s - self.elapsed_time
-                QMessageBox.information(self, '설정 완료', f'오프셋이 {self.video_offset_seconds}초로 설정되었습니다.')
-            except:
-                QMessageBox.warning(self, '입력 오류', '올바른 형식(MM:SS)으로 입력하세요.')
-
     def edit_highlight_inline(self, item):
         new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=item.text())
         if ok and new_text:
@@ -223,42 +216,190 @@ class HighlightRecorder(QWidget):
         )
         if file_path:
             base = os.path.splitext(file_path)[0]
-
-            # 메모 텍스트 저장
-            with open(base + '_memo.txt', 'w', encoding='utf-8') as f:
-                for m, lst in self.highlights_by_match.items():
-                    f.write(f"=== Match {m} ===\n\n")
-                    for h in lst:
-                        f.write(h.to_display_string() + '\n\n')
-
-            # 매치별 XML 저장
+            try:
+                with open(base + '_memo.txt', 'w', encoding='utf-8') as f:
+                    for m, lst in self.highlights_by_match.items():
+                        f.write(f"=== Match {m} ===\n\n")
+                        for h in lst:
+                            f.write(h.to_display_string() + '\n\n')
+            except Exception as e:
+                QMessageBox.critical(self, "저장 실패", f"메모 텍스트 저장 중 오류가 발생했습니다:\n{str(e)}")
+                return
             for m, lst in self.highlights_by_match.items():
-                root = Element("xmeml")
-                root.set("version", "4")
-
-                sequence = SubElement(root, "sequence", {"id": "sequence"})
-                SubElement(sequence, "uuid").text = str(uuid4())
-                SubElement(sequence, "duration").text = "0"
-
-                rate = SubElement(sequence, "rate")
-                SubElement(rate, "timebase").text = "60"
-                SubElement(rate, "ntsc").text = "FALSE"
-
-                SubElement(sequence, "name").text = f"Marker - (Match {m})"
-
-                for h in lst:
-                    marker = SubElement(sequence, "marker")
-                    SubElement(marker, "comment").text = h.memo
-                    SubElement(marker, "name").text = h.memo
-                    SubElement(marker, "in").text = str(int(h.offset_start * 60))
-                    SubElement(marker, "out").text = "-1"
-                    SubElement(marker, "pproColor").text = "4294741314"
-
-                xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
-                xml_path = f"{base}_markers_match_{m}.xml"
-                with open(xml_path, "w", encoding="utf-8") as f:
-                    f.write(xml_str)
-
+                try:
+                    root = Element("xmeml")
+                    root.set("version", "4")
+                    sequence = SubElement(root, "sequence", {
+                        "id": f"sequence_{m}",
+                        "TL.SQAudioVisibleBase": "0",
+                        "TL.SQVideoVisibleBase": "0",
+                        "TL.SQVisibleBaseTime": "0",
+                        "TL.SQAVDividerPosition": "0.5",
+                        "TL.SQHideShyTracks": "0",
+                        "TL.SQHeaderWidth": "292",
+                        "Monitor.ProgramZoomOut": "0",
+                        "Monitor.ProgramZoomIn": "0",
+                        "TL.SQTimePerPixel": "0.2",
+                        "MZ.EditLine": "0",
+                        "MZ.Sequence.PreviewFrameSizeHeight": "1080",
+                        "MZ.Sequence.PreviewFrameSizeWidth": "1920",
+                        "MZ.Sequence.AudioTimeDisplayFormat": "200",
+                        "MZ.Sequence.PreviewRenderingClassID": "1061109567",
+                        "MZ.Sequence.PreviewRenderingPresetCodec": "1634755439",
+                        "MZ.Sequence.PreviewRenderingPresetPath": "EncoderPresets/SequencePreview/795454d9-d3c2-429d-9474-923ab13b7018/QuickTime.epr",
+                        "MZ.Sequence.PreviewUseMaxRenderQuality": "false",
+                        "MZ.Sequence.PreviewUseMaxBitDepth": "false",
+                        "MZ.Sequence.EditingModeGUID": "795454d9-d3c2-429d-9474-923ab13b7018",
+                        "MZ.Sequence.VideoTimeDisplayFormat": "101",
+                        "MZ.WorkOutPoint": "4612930560000",
+                        "MZ.WorkInPoint": "0",
+                        "explodedTracks": "true"
+                    })
+                    SubElement(sequence, "uuid").text = str(uuid4())
+                    max_duration = max((h.raw_end for h in lst), default=1)
+                    SubElement(sequence, "duration").text = str(int(max_duration * 60))
+                    rate = SubElement(sequence, "rate")
+                    SubElement(rate, "timebase").text = "60"
+                    SubElement(rate, "ntsc").text = "FALSE"
+                    SubElement(sequence, "name").text = f"Marker - (Match {m})"
+                    media = SubElement(sequence, "media")
+                    video = SubElement(media, "video")
+                    format_elem = SubElement(video, "format")
+                    samplecharacteristics = SubElement(format_elem, "samplecharacteristics")
+                    rate = SubElement(samplecharacteristics, "rate")
+                    SubElement(rate, "timebase").text = "60"
+                    SubElement(rate, "ntsc").text = "FALSE"
+                    codec = SubElement(samplecharacteristics, "codec")
+                    SubElement(codec, "name").text = "Apple ProRes 422"
+                    appspecificdata = SubElement(codec, "appspecificdata")
+                    SubElement(appspecificdata, "appname").text = "Final Cut Pro"
+                    SubElement(appspecificdata, "appmanufacturer").text = "Apple Inc."
+                    SubElement(appspecificdata, "appversion").text = "7.0"
+                    data = SubElement(appspecificdata, "data")
+                    qtcodec = SubElement(data, "qtcodec")
+                    SubElement(qtcodec, "codecname").text = "Apple ProRes 422"
+                    SubElement(qtcodec, "codectypename").text = "Apple ProRes 422"
+                    SubElement(qtcodec, "codectypecode").text = "apcn"
+                    SubElement(qtcodec, "codecvendorcode").text = "appl"
+                    SubElement(qtcodec, "spatialquality").text = "1024"
+                    SubElement(qtcodec, "temporalquality").text = "0"
+                    SubElement(qtcodec, "keyframerate").text = "0"
+                    SubElement(qtcodec, "datarate").text = "0"
+                    SubElement(samplecharacteristics, "width").text = "1920"
+                    SubElement(samplecharacteristics, "height").text = "1080"
+                    SubElement(samplecharacteristics, "anamorphic").text = "FALSE"
+                    SubElement(samplecharacteristics, "pixelaspectratio").text = "square"
+                    SubElement(samplecharacteristics, "fielddominance").text = "none"
+                    SubElement(samplecharacteristics, "colordepth").text = "24"
+                    track = SubElement(video, "track", {
+                        "TL.SQTrackShy": "0",
+                        "TL.SQTrackExpandedHeight": "25",
+                        "TL.SQTrackExpanded": "0",
+                        "MZ.TrackTargeted": "0"
+                    })
+                    SubElement(track, "enabled").text = "TRUE"
+                    SubElement(track, "locked").text = "FALSE"
+                    generatoritem = SubElement(track, "generatoritem", {"id": f"generatoritem_{m}"})
+                    SubElement(generatoritem, "name").text = f"Marker Color Matte (Match {m})"
+                    SubElement(generatoritem, "enabled").text = "TRUE"
+                    SubElement(generatoritem, "duration").text = str(int(max_duration * 60))
+                    rate = SubElement(generatoritem, "rate")
+                    SubElement(rate, "timebase").text = "60"
+                    SubElement(rate, "ntsc").text = "FALSE"
+                    SubElement(generatoritem, "start").text = "0"
+                    SubElement(generatoritem, "end").text = str(int(max_duration * 60))
+                    SubElement(generatoritem, "in").text = "0"
+                    SubElement(generatoritem, "out").text = str(int(max_duration * 60))
+                    SubElement(generatoritem, "alphatype").text = "none"
+                    effect = SubElement(generatoritem, "effect")
+                    SubElement(effect, "name").text = "Color"
+                    SubElement(effect, "effectid").text = "Color"
+                    SubElement(effect, "effectcategory").text = "Matte"
+                    SubElement(effect, "effecttype").text = "generator"
+                    SubElement(effect, "mediatype").text = "video"
+                    parameter = SubElement(effect, "parameter", {"authoringApp": "PremierePro"})
+                    SubElement(parameter, "parameterid").text = "fillcolor"
+                    SubElement(parameter, "name").text = "Color"
+                    value = SubElement(parameter, "value")
+                    SubElement(value, "alpha").text = "0"
+                    SubElement(value, "red").text = "0"
+                    SubElement(value, "green").text = "0"
+                    SubElement(value, "blue").text = "0"
+                    filter = SubElement(generatoritem, "filter")
+                    effect = SubElement(filter, "effect")
+                    SubElement(effect, "name").text = "Opacity"
+                    SubElement(effect, "effectid").text = "opacity"
+                    SubElement(effect, "effectcategory").text = "motion"
+                    SubElement(effect, "effecttype").text = "motion"
+                    SubElement(effect, "mediatype").text = "video"
+                    SubElement(effect, "pproBypass").text = "false"
+                    parameter = SubElement(effect, "parameter", {"authoringApp": "PremierePro"})
+                    SubElement(parameter, "parameterid").text = "opacity"
+                    SubElement(parameter, "name").text = "opacity"
+                    SubElement(parameter, "valuemin").text = "0"
+                    SubElement(parameter, "valuemax").text = "100"
+                    SubElement(parameter, "value").text = "0"
+                    seen_in_values = set()
+                    for i, h in enumerate(lst):
+                        in_value = int(h.raw_start * 60)
+                        out_value = int(h.raw_end * 60)
+                        if in_value > out_value:
+                            print(f"Warning: Invalid marker range for highlight {i+1}: in={in_value}, out={out_value}")
+                            out_value = in_value + 60  # Default to 1-second duration
+                        while in_value in seen_in_values:
+                            in_value += 1
+                            out_value += 1
+                        seen_in_values.add(in_value)
+                        marker = SubElement(generatoritem, "marker")
+                        SubElement(marker, "comment").text = h.memo
+                        SubElement(marker, "name").text = ""
+                        SubElement(marker, "in").text = str(in_value)
+                        SubElement(marker, "out").text = str(out_value)
+                        SubElement(marker, "pproColor").text = "4294741314"
+                    timecode = SubElement(sequence, "timecode")
+                    rate = SubElement(timecode, "rate")
+                    SubElement(rate, "timebase").text = "60"
+                    SubElement(rate, "ntsc").text = "FALSE"
+                    SubElement(timecode, "string").text = "00:00:00:00"
+                    SubElement(timecode, "frame").text = "0"
+                    SubElement(timecode, "displayformat").text = "NDF"
+                    labels = SubElement(sequence, "labels")
+                    SubElement(labels, "label2").text = "Iris"
+                    logginginfo = SubElement(sequence, "logginginfo")
+                    SubElement(logginginfo, "description").text = ""
+                    SubElement(logginginfo, "scene").text = ""
+                    SubElement(logginginfo, "shottake").text = ""
+                    SubElement(logginginfo, "lognote").text = ""
+                    SubElement(logginginfo, "good").text = ""
+                    SubElement(logginginfo, "originalvideofilename").text = ""
+                    SubElement(logginginfo, "originalaudiofilename").text = ""
+                    seen_in_values.clear()
+                    for i, h in enumerate(lst):
+                        in_value = int(h.raw_start * 60)
+                        out_value = int(h.raw_end * 60)
+                        if in_value > out_value:
+                            print(f"Warning: Invalid marker range for highlight {i+1}: in={in_value}, out={out_value}")
+                            out_value = in_value + 60
+                        while in_value in seen_in_values:
+                            in_value += 1
+                            out_value += 1
+                        seen_in_values.add(in_value)
+                        marker = SubElement(sequence, "marker")
+                        SubElement(marker, "comment").text = h.memo
+                        SubElement(marker, "name").text = ""
+                        SubElement(marker, "in").text = str(in_value)
+                        SubElement(marker, "out").text = str(out_value)
+                        SubElement(marker, "pproColor").text = "4294741314"
+                    xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
+                    xml_path = f"{base}_markers_match_{m}.xml"
+                    with open(xml_path, "w", encoding="utf-8") as f:
+                        f.write(xml_str)
+                except Exception as e:
+                    QMessageBox.critical(self, "XML 저장 실패",
+                                         f"Match {m}의 XML 저장 중 오류가 발생했습니다:\n{str(e)}")
+                    return
+            QMessageBox.information(self, "저장 완료", "모든 하이라이트가 성공적으로 저장되었습니다.")
+            self.saved = True
 
     def auto_save_highlights(self):
         if self.highlights_by_match:
@@ -268,9 +409,10 @@ class HighlightRecorder(QWidget):
                     for h in lst:
                         f.write(h.to_display_string() + '\n')
 
-
     def closeEvent(self, event):
-        if any(self.highlights_by_match.values()) and not self.saved:
+        if not any(self.highlights_by_match.values()):
+            event.accept()
+        elif not self.saved:
             reply = QMessageBox.question(self, '종료 확인',
                                          '하이라이트가 저장되지 않았습니다. 저장 후 종료하시겠습니까?',
                                          QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
