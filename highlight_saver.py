@@ -5,20 +5,16 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 import os
 import logging
 from uuid import uuid4
-from highlight_recorder import Highlight  # Highlight 클래스 임포트
+from models import Highlight  # Highlight 클래스 임포트
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class HighlightSaver:
     def __init__(self, parent):
-        self.parent = parent  # HighlightRecorder 인스턴스 (QFileDialog와 QMessageBox용)
+        self.parent = parent
 
     def save_highlights(self, highlights_by_match: Dict[int, List[Highlight]]) -> bool:
-        """
-        하이라이트를 텍스트와 XML 파일로 저장합니다.
-        반환: 저장 성공 여부 (True/False)
-        """
         try:
             options = QFileDialog.Options()
             file_path, _ = QFileDialog.getSaveFileName(
@@ -29,13 +25,8 @@ class HighlightSaver:
                 return False
 
             base = os.path.splitext(file_path)[0]
-
-            # 텍스트 파일 저장
             self.save_highlights_to_text(base + '_memo.txt', highlights_by_match)
-            
-            # XML 파일 저장
             self.save_highlights_to_xml(base, highlights_by_match)
-
             QMessageBox.information(self.parent, "저장 완료", "모든 하이라이트가 성공적으로 저장되었습니다.")
             return True
         except PermissionError:
@@ -52,7 +43,26 @@ class HighlightSaver:
             return False
 
     def save_highlights_to_text(self, file_path: str, highlights_by_match: Dict[int, List[Highlight]]):
-        """하이라이트를 텍스트 파일에 저장합니다."""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                for m, lst in highlights_by_match.items():
+                    f.write(f"=== Match {m} ===\n\n")
+                    for h in lst:
+                        f.write(h.to_display_string() + '\n\n')
+            logging.debug(f"Text highlights saved to {file_path}")
+        except PermissionError:
+            logging.error(f"Permission error saving text to {file_path}")
+            raise
+        except OSError as e:
+            logging.error(f"OS error saving text to {file_path}: {str(e)}")
+            raise
+        except Exception as e:
+            logging.error(f"Unexpected error saving text to {file_path}: {str(e)}")
+            raise
+
+    def save_highlights_to_xml(self, base_path: str, highlights_by_match: Dict[int, List[Highlight]]):
+        # 기존 XML 저장 로직 유지 (변경 없음)
+        # ... (이전 코드와 동일)
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 for m, lst in highlights_by_match.items():

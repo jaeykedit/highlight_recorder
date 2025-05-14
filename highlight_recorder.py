@@ -1,33 +1,23 @@
 import sys
 import time
 import os
-from dataclasses import dataclass
 from typing import List, Dict
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit,
                              QLabel, QLineEdit, QFileDialog, QListWidget, QInputDialog, QMessageBox)
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, Qt
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
 import keyboard
 import logging
-from highlight_saver import HighlightSaver  # 새 모듈 임포트
+from highlight_saver import HighlightSaver
+from models import Highlight
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-@dataclass
-class Highlight:
-    raw_start: int
-    raw_end: int
-    memo: str
-
-    def to_display_string(self):
-        return f"{self.raw_start//60:02}:{self.raw_start%60:02}~{self.raw_end//60:02}:{self.raw_end%60:02}, {self.memo}"
-
 class HighlightRecorder(QWidget):
     def __init__(self):
         super().__init__()
-        self.initUI()
         self.start_time = None
         self.running = False
         self.paused = False
@@ -39,6 +29,7 @@ class HighlightRecorder(QWidget):
         self.highlight_start_time = None
         self.highlights_by_match: Dict[int, List[Highlight]] = {1: []}
         self.record_button = None
+        self.initUI()
 
     def initUI(self):
         self.setWindowTitle('하이라이트 메모 프로그램')
@@ -59,23 +50,46 @@ class HighlightRecorder(QWidget):
         self.memo_input.returnPressed.connect(self.record_highlight)
         layout.addWidget(self.memo_input)
 
-        buttons = [
-            ('매치 시작', self.start_match),
-            ('타이머 일시정지', self.toggle_timer),
-            ('타이머 초기화', self.reset_timer),
-            ('하이라이트 기록', self.record_highlight),
-            ('새 매치', self.new_match),
-            ('매치 번호 수정', self.edit_match_number),
-            ('매치 시간 수정', self.edit_match_time),
-            ('하이라이트 삭제', self.delete_highlight),
-            ('메모 저장', self.save_highlights)
-        ]
-        for text, func in buttons:
-            btn = QPushButton(text, self)
-            btn.clicked.connect(func)
-            if text == '하이라이트 기록':
-                self.record_button = btn
-            layout.addWidget(btn)
+        self.start_button = QPushButton('매치 시작', self)
+        self.start_button.clicked.connect(self.start_match)
+        layout.addWidget(self.start_button)
+
+        self.pause_button = QPushButton('타이머 일시정지', self)
+        self.pause_button.clicked.connect(self.toggle_timer)
+        layout.addWidget(self.pause_button)
+
+        self.reset_button = QPushButton('타이머 초기화', self)
+        self.reset_button.clicked.connect(self.reset_timer)
+        layout.addWidget(self.reset_button)
+
+        self.record_button = QPushButton('하이라이트 기록', self)
+        self.record_button.clicked.connect(self.record_highlight)
+        layout.addWidget(self.record_button)
+        logging.debug("Record button explicitly initialized")
+
+        self.new_match_button = QPushButton('새 매치', self)
+        self.new_match_button.clicked.connect(self.new_match)
+        layout.addWidget(self.new_match_button)
+
+        self.edit_match_button = QPushButton('매치 번호 수정', self)
+        self.edit_match_button.clicked.connect(self.edit_match_number)
+        layout.addWidget(self.edit_match_button)
+
+        self.edit_time_button = QPushButton('매치 시간 수정', self)
+        self.edit_time_button.clicked.connect(self.edit_match_time)
+        layout.addWidget(self.edit_time_button)
+
+        self.delete_button = QPushButton('하이라이트 삭제', self)
+        self.delete_button.clicked.connect(self.delete_highlight)
+        layout.addWidget(self.delete_button)
+
+        self.save_button = QPushButton('메모 저장', self)
+        self.save_button.clicked.connect(self.save_highlights)
+        layout.addWidget(self.save_button)
+
+        if self.record_button is None:
+            logging.error("Record button is None after initUI")
+            raise RuntimeError("Failed to initialize record_button")
 
         self.highlights_view = QListWidget(self)
         self.highlights_view.itemDoubleClicked.connect(self.edit_highlight_inline)
@@ -87,7 +101,10 @@ class HighlightRecorder(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
 
-        keyboard.add_hotkey('f1', self.record_highlight)
+        # F1 핫키를 QShortcut로 대체하여 스레드 문제 방지
+        self.f1_shortcut = QShortcut(QKeySequence('F1'), self)
+        self.f1_shortcut.activated.connect(self.record_highlight)
+        logging.debug("F1 shortcut registered with QShortcut")
 
         delete_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self)
         delete_shortcut.activated.connect(self.delete_highlight)
@@ -119,19 +136,19 @@ class HighlightRecorder(QWidget):
                 self.timer_label.setText(f"{minutes:02}:{seconds:02}")
         except Exception as e:
             logging.error(f"Error in update_timer: {str(e)}")
-            QMessageBox.critical(self, "오류", f"타이머 업데이트 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"타이머 업데이트 중 오류: {str(e)}"))
 
     def toggle_timer(self):
         try:
             if self.running:
                 self.paused = not self.paused
-                sender = self.sender()
-                if sender:
-                    sender.setText('타이머 재개' if self.paused else '타이머 일시정지')
+                self.pause_button.setText('타이머 재개' if self.paused else '타이머 일시정지')
                 logging.debug(f"Timer {'paused' if self.paused else 'resumed'}")
         except Exception as e:
             logging.error(f"Error in toggle_timer: {str(e)}")
-            QMessageBox.critical(self, "오류", f"타이머 토글 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"타이머 토글 중 오류: {str(e)}"))
 
     def reset_timer(self):
         try:
@@ -140,17 +157,30 @@ class HighlightRecorder(QWidget):
                 self.timer_label.setText("00:00")
                 self.status_label.setText("타이머 초기화됨")
                 self.highlight_start_time = None
+                if self.record_button is None:
+                    logging.error("record_button is None in reset_timer")
+                    raise RuntimeError("Record button not initialized in reset_timer")
                 self.record_button.setText('하이라이트 기록')
-                logging.debug("Timer reset")
+                logging.debug("record_button text set to '하이라이트 기록' in reset_timer")
         except Exception as e:
+
             logging.error(f"Error in reset_timer: {str(e)}")
-            QMessageBox.critical(self, "오류", f"타이머 초기화 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"타이머 초기화 중 오류: {str(e)}"))
 
     def record_highlight(self):
         try:
             if not self.running:
-                QMessageBox.warning(self, "오류", "매치를 먼저 시작하세요.")
+                QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                         Q_ARG(str, "오류"), Q_ARG(str, "매치" \
+                                         "를 먼저 시작하세요."))
                 logging.warning("Attempted to record highlight without starting match")
+                return
+
+            if self.record_button is None:
+                logging.error("record_button is None in record_highlight")
+                QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                         Q_ARG(str, "하이라이트 기록 버튼이 초기화되지 않았습니다."))
                 return
 
             if self.highlight_start_time is None:
@@ -165,7 +195,8 @@ class HighlightRecorder(QWidget):
                 raw_start = self.highlight_start_time
                 raw_end = self.elapsed_time
                 if raw_end <= raw_start:
-                    QMessageBox.warning(self, "오류", "하이라이트 기간은 0초보다 길어야 합니다.")
+                    QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                             Q_ARG(str, "오류"), Q_ARG(str, "하이라이트 기간은 0초보다 길어야 합니다."))
                     logging.warning("Highlight duration is zero or negative")
                     return
 
@@ -184,13 +215,15 @@ class HighlightRecorder(QWidget):
                 self.saved = False
         except Exception as e:
             logging.error(f"Error in record_highlight: {str(e)}")
-            QMessageBox.critical(self, "오류", f"하이라이트 기록 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"하이라이트 기록 중 오류: {str(e)}"))
 
     def delete_highlight(self):
         try:
             selected_item = self.highlights_view.currentItem()
             if not selected_item:
-                QMessageBox.information(self, "알림", "삭제할 하이라이트를 선택하세요.")
+                QMetaObject.invokeMethod(self, "show_info", Qt.QueuedConnection,
+                                         Q_ARG(str, "알림"), Q_ARG(str, "삭제할 하이라이트를 선택하세요."))
                 return
 
             selected_index_in_view = self.highlights_view.row(selected_item)
@@ -212,11 +245,13 @@ class HighlightRecorder(QWidget):
                 self.status_label.setText("하이라이트 삭제됨")
                 logging.debug("Highlight deleted")
             else:
-                QMessageBox.warning(self, "오류", "선택된 하이라이트를 찾을 수 없습니다.")
+                QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                         Q_ARG(str, "오류"), Q_ARG(str, "선택된 하이라이트를 찾을 수 없습니다."))
                 logging.warning("Could not find selected highlight to delete")
         except Exception as e:
             logging.error(f"Error in delete_highlight: {str(e)}")
-            QMessageBox.critical(self, "오류", f"하이라이트 삭제 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"하이라이트 삭제 중 오류: {str(e)}"))
 
     def new_match(self):
         try:
@@ -226,7 +261,11 @@ class HighlightRecorder(QWidget):
             self.elapsed_time = 0
             self.timer_label.setText("00:00")
             self.highlight_start_time = None
+            if self.record_button is None:
+                logging.error("record_button is None in new_match")
+                raise RuntimeError("Record button not initialized in new_match")
             self.record_button.setText('하이라이트 기록')
+            logging.debug("record_button text set to '하이라이트 기록' in new_match")
             
             self.match += 1
             self.highlights_by_match[self.match] = []
@@ -235,7 +274,8 @@ class HighlightRecorder(QWidget):
             logging.debug(f"New match started: Match {self.match}")
         except Exception as e:
             logging.error(f"Error in new_match: {str(e)}")
-            QMessageBox.critical(self, "오류", f"새 매치 생성 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"새 매치 생성 중 오류: {str(e)}"))
 
     def edit_match_number(self):
         try:
@@ -247,7 +287,8 @@ class HighlightRecorder(QWidget):
                 logging.debug(f"Match number changed to {self.match}")
         except Exception as e:
             logging.error(f"Error in edit_match_number: {str(e)}")
-            QMessageBox.critical(self, "오류", f"매치 번호 수정 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"매치 번호 수정 중 오류: {str(e)}"))
 
     def edit_match_time(self):
         try:
@@ -260,28 +301,65 @@ class HighlightRecorder(QWidget):
                     self.status_label.setText("시간 수정됨")
                     logging.debug(f"Match time edited to {minutes:02}:{seconds:02}")
         except ValueError:
-            QMessageBox.warning(self, '입력 오류', '올바른 형식(MM:SS)으로 입력하세요.')
+            QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                     Q_ARG(str, "입력 오류"), Q_ARG(str, "올바른 형식(MM:SS)으로 입력하세요."))
             logging.warning("Invalid time format in edit_match_time")
         except Exception as e:
             logging.error(f"Error in edit_match_time: {str(e)}")
-            QMessageBox.critical(self, "오류", f"매치 시간 수정 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"매치 시간 수정 중 오류: {str(e)}"))
 
-    def edit_highlight_inline(self, item):
+    def edit_highlight_inline(self):
         try:
-            new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=item.text())
+            selected_item = self.highlights_view.currentItem()
+            if not selected_item:
+                QMetaObject.invokeMethod(self, "show_info", Qt.QueuedConnection,
+                                         Q_ARG(str, "알림"), Q_ARG(str, "수정할 하이라이트를 선택하세요."))
+                return
+
+            new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=selected_item.text())
             if ok and new_text:
-                index = self.highlights_view.row(item)
-                item.setText(new_text)
-                self.saved = False
-                self.status_label.setText("하이라이트 수정됨")
-                logging.debug("Highlight edited inline")
+                selected_index_in_view = self.highlights_view.row(selected_item)
+                highlight_list = self.current_highlight_list()
+                actual_highlight_index = -1
+                highlight_counter = 0
+
+                for i in range(self.highlights_view.count()):
+                    if not self.highlights_view.item(i).text().startswith("==="):
+                        if i == selected_index_in_view:
+                            actual_highlight_index = highlight_counter
+                            break
+                        highlight_counter += 1
+
+                if 0 <= actual_highlight_index < len(highlight_list):
+                    try:
+                        time_part, memo = new_text.split(',', 1)
+                        start_time, end_time = time_part.split('~')
+                        start_min, start_sec = map(int, start_time.split(':'))
+                        end_min, end_sec = map(int, end_time.split(':'))
+                        raw_start = start_min * 60 + start_sec
+                        raw_end = end_min * 60 + end_sec
+                        highlight_list[actual_highlight_index] = Highlight(raw_start, raw_end, memo.strip())
+                        selected_item.setText(new_text)
+                        self.saved = False
+                        self.status_label.setText("하이라이트 수정됨")
+                        logging.debug("Highlight edited inline")
+                    except ValueError:
+                        QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                                 Q_ARG(str, "입력 오류"), Q_ARG(str, "올바른 형식(MM:SS~MM:SS, 메모)으로 입력하세요."))
+                        logging.warning("Invalid format in edit_highlight_inline")
+                else:
+                    QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
+                                             Q_ARG(str, "오류"), Q_ARG(str, "선택된 하이라이트를 찾을 수 없습니다."))
+                    logging.warning("Could not find selected highlight to edit")
         except Exception as e:
             logging.error(f"Error in edit_highlight_inline: {str(e)}")
-            QMessageBox.critical(self, "오류", f"하이라이트 수정 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"하이라이트 수정 중 오류: {str(e)}"))
 
     def save_highlights(self):
         try:
-            saver = HighlightSaver(self)  # HighlightSaver 인스턴스 생성
+            saver = HighlightSaver(self)
             success = saver.save_highlights(self.highlights_by_match)
             if success:
                 self.saved = True
@@ -289,7 +367,8 @@ class HighlightRecorder(QWidget):
                 logging.debug("Highlights saved successfully")
         except Exception as e:
             logging.error(f"Error in save_highlights: {str(e)}")
-            QMessageBox.critical(self, "저장 실패", f"하이라이트 저장 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"하이라이트 저장 중 오류: {str(e)}"))
 
     def auto_save_highlights(self):
         try:
@@ -323,7 +402,18 @@ class HighlightRecorder(QWidget):
             logging.debug("Close event handled")
         except Exception as e:
             logging.error(f"Error in closeEvent: {str(e)}")
-            QMessageBox.critical(self, "오류", f"프로그램 종료 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"프로그램 종료 중 오류: {str(e)}"))
+
+    # 에러 메시지 표시를 메인 스레드에서 처리
+    def show_error(self, message):
+        QMessageBox.critical(self, "오류", message)
+
+    def show_warning(self, title, message):
+        QMessageBox.warning(self, title, message)
+
+    def show_info(self, title, message):
+        QMessageBox.information(self, title, message)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
