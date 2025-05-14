@@ -4,10 +4,9 @@ import os
 from typing import List, Dict
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit,
                              QLabel, QLineEdit, QFileDialog, QListWidget, QInputDialog, QMessageBox)
-from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, Qt
+from PyQt5.QtCore import Qt, QTimer, QMetaObject, Q_ARG, pyqtSlot
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
-import keyboard
 import logging
 from highlight_saver import HighlightSaver
 from models import Highlight
@@ -101,7 +100,6 @@ class HighlightRecorder(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_timer)
 
-        # F1 핫키를 QShortcut로 대체하여 스레드 문제 방지
         self.f1_shortcut = QShortcut(QKeySequence('F1'), self)
         self.f1_shortcut.activated.connect(self.record_highlight)
         logging.debug("F1 shortcut registered with QShortcut")
@@ -125,7 +123,8 @@ class HighlightRecorder(QWidget):
                 logging.debug("Match started")
         except Exception as e:
             logging.error(f"Error in start_match: {str(e)}")
-            QMessageBox.critical(self, "오류", f"매치 시작 중 오류: {str(e)}")
+            QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
+                                     Q_ARG(str, f"매치 시작 중 오류: {str(e)}"))
 
     def update_timer(self):
         try:
@@ -163,7 +162,6 @@ class HighlightRecorder(QWidget):
                 self.record_button.setText('하이라이트 기록')
                 logging.debug("record_button text set to '하이라이트 기록' in reset_timer")
         except Exception as e:
-
             logging.error(f"Error in reset_timer: {str(e)}")
             QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
                                      Q_ARG(str, f"타이머 초기화 중 오류: {str(e)}"))
@@ -172,8 +170,7 @@ class HighlightRecorder(QWidget):
         try:
             if not self.running:
                 QMetaObject.invokeMethod(self, "show_warning", Qt.QueuedConnection,
-                                         Q_ARG(str, "오류"), Q_ARG(str, "매치" \
-                                         "를 먼저 시작하세요."))
+                                         Q_ARG(str, "오류"), Q_ARG(str, "매치를 먼저 시작하세요."))
                 logging.warning("Attempted to record highlight without starting match")
                 return
 
@@ -405,13 +402,15 @@ class HighlightRecorder(QWidget):
             QMetaObject.invokeMethod(self, "show_error", Qt.QueuedConnection,
                                      Q_ARG(str, f"프로그램 종료 중 오류: {str(e)}"))
 
-    # 에러 메시지 표시를 메인 스레드에서 처리
+    @pyqtSlot(str)
     def show_error(self, message):
         QMessageBox.critical(self, "오류", message)
 
+    @pyqtSlot(str, str)
     def show_warning(self, title, message):
         QMessageBox.warning(self, title, message)
 
+    @pyqtSlot(str, str)
     def show_info(self, title, message):
         QMessageBox.information(self, title, message)
 
