@@ -3,15 +3,17 @@ import time
 import os
 from dataclasses import dataclass
 from typing import List, Dict
-from xml.etree.ElementTree import Element, SubElement, tostring
-from xml.dom import minidom
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QTextEdit,
                              QLabel, QLineEdit, QFileDialog, QListWidget, QInputDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
-from uuid import uuid4
 import keyboard
+import logging
+from highlight_saver import HighlightSaver  # 새 모듈 임포트
+
+# 로깅 설정
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @dataclass
 class Highlight:
@@ -36,11 +38,10 @@ class HighlightRecorder(QWidget):
         self.auto_save_timer.timeout.connect(self.auto_save_highlights)
         self.highlight_start_time = None
         self.highlights_by_match: Dict[int, List[Highlight]] = {1: []}
-        self.record_button = None  # Will be set in initUI
+        self.record_button = None
 
     def initUI(self):
         self.setWindowTitle('하이라이트 메모 프로그램')
-
         layout = QVBoxLayout()
 
         self.timer_label = QLabel('00:00', self)
@@ -95,368 +96,234 @@ class HighlightRecorder(QWidget):
         return self.highlights_by_match.setdefault(self.match, [])
 
     def start_match(self):
-        if not self.running:
-            self.start_time = time.time()
-            self.running = True
-            self.paused = False
-            self.elapsed_time = 0
-            self.timer.start(1000)
-            self.auto_save_timer.start(60000)
-            self.status_label.setText("매치 시작됨")
+        try:
+            if not self.running:
+                self.start_time = time.time()
+                self.running = True
+                self.paused = False
+                self.elapsed_time = 0
+                self.timer.start(1000)
+                self.auto_save_timer.start(60000)
+                self.status_label.setText("매치 시작됨")
+                logging.debug("Match started")
+        except Exception as e:
+            logging.error(f"Error in start_match: {str(e)}")
+            QMessageBox.critical(self, "오류", f"매치 시작 중 오류: {str(e)}")
 
     def update_timer(self):
-        if not self.paused:
-            self.elapsed_time += 1
-            minutes = self.elapsed_time // 60
-            seconds = self.elapsed_time % 60
-            self.timer_label.setText(f"{minutes:02}:{seconds:02}")
+        try:
+            if not self.paused:
+                self.elapsed_time += 1
+                minutes = self.elapsed_time // 60
+                seconds = self.elapsed_time % 60
+                self.timer_label.setText(f"{minutes:02}:{seconds:02}")
+        except Exception as e:
+            logging.error(f"Error in update_timer: {str(e)}")
+            QMessageBox.critical(self, "오류", f"타이머 업데이트 중 오류: {str(e)}")
 
     def toggle_timer(self):
-        if self.running:
-            self.paused = not self.paused
-            sender = self.sender()
-            if sender:
-                sender.setText('타이머 재개' if self.paused else '타이머 일시정지')
+        try:
+            if self.running:
+                self.paused = not self.paused
+                sender = self.sender()
+                if sender:
+                    sender.setText('타이머 재개' if self.paused else '타이머 일시정지')
+                logging.debug(f"Timer {'paused' if self.paused else 'resumed'}")
+        except Exception as e:
+            logging.error(f"Error in toggle_timer: {str(e)}")
+            QMessageBox.critical(self, "오류", f"타이머 토글 중 오류: {str(e)}")
 
     def reset_timer(self):
-        if self.running:
-            self.elapsed_time = 0
-            self.timer_label.setText("00:00")
-            self.status_label.setText("타이머 초기화됨")
-            self.highlight_start_time = None
-            self.record_button.setText('하이라이트 기록')
+        try:
+            if self.running:
+                self.elapsed_time = 0
+                self.timer_label.setText("00:00")
+                self.status_label.setText("타이머 초기화됨")
+                self.highlight_start_time = None
+                self.record_button.setText('하이라이트 기록')
+                logging.debug("Timer reset")
+        except Exception as e:
+            logging.error(f"Error in reset_timer: {str(e)}")
+            QMessageBox.critical(self, "오류", f"타이머 초기화 중 오류: {str(e)}")
 
     def record_highlight(self):
-        if not self.running:
-            QMessageBox.warning(self, "오류", "매치를 먼저 시작하세요.")
-            return
-
-        if self.highlight_start_time is None:
-            self.highlight_start_time = self.elapsed_time
-            minutes = self.highlight_start_time // 60
-            seconds = self.highlight_start_time % 60
-            self.status_label.setText(f"기록 시작: {minutes:02}:{seconds:02} (Recording...)")
-            self.record_button.setText('기록 중지')
-            self.memo_input.setFocus()
-        else:
-            raw_start = self.highlight_start_time
-            raw_end = self.elapsed_time
-            if raw_end <= raw_start:
-                QMessageBox.warning(self, "오류", "하이라이트 기간은 0초보다 길어야 합니다.")
+        try:
+            if not self.running:
+                QMessageBox.warning(self, "오류", "매치를 먼저 시작하세요.")
+                logging.warning("Attempted to record highlight without starting match")
                 return
 
-            memo = self.memo_input.text().strip() or '하이라이트'
-            h = Highlight(raw_start, raw_end, memo)
-            self.current_highlight_list().append(h)
-            print(f"Recorded highlight: raw_start={raw_start}, raw_end={raw_end}, memo={memo}")  # Debugging log
-            if not any(self.highlights_view.item(i).text() == f"=== Match {self.match} ==="
-                       for i in range(self.highlights_view.count())):
-                self.highlights_view.addItem(f"=== Match {self.match} ===")
-            self.highlights_view.addItem(h.to_display_string())
-            self.highlight_start_time = None
-            self.memo_input.clear()
-            self.status_label.setText("하이라이트 기록됨")
-            self.record_button.setText('하이라이트 기록')
-            self.saved = False
+            if self.highlight_start_time is None:
+                self.highlight_start_time = self.elapsed_time
+                minutes = self.highlight_start_time // 60
+                seconds = self.highlight_start_time % 60
+                self.status_label.setText(f"기록 시작: {minutes:02}:{seconds:02} (Recording...)")
+                self.record_button.setText('기록 중지')
+                self.memo_input.setFocus()
+                logging.debug(f"Highlight recording started at {self.highlight_start_time}")
+            else:
+                raw_start = self.highlight_start_time
+                raw_end = self.elapsed_time
+                if raw_end <= raw_start:
+                    QMessageBox.warning(self, "오류", "하이라이트 기간은 0초보다 길어야 합니다.")
+                    logging.warning("Highlight duration is zero or negative")
+                    return
+
+                memo = self.memo_input.text().strip() or '하이라이트'
+                h = Highlight(raw_start, raw_end, memo)
+                self.current_highlight_list().append(h)
+                logging.debug(f"Recorded highlight: raw_start={raw_start}, raw_end={raw_end}, memo={memo}")
+                if not any(self.highlights_view.item(i).text() == f"=== Match {self.match} ==="
+                           for i in range(self.highlights_view.count())):
+                    self.highlights_view.addItem(f"=== Match {self.match} ===")
+                self.highlights_view.addItem(h.to_display_string())
+                self.highlight_start_time = None
+                self.memo_input.clear()
+                self.status_label.setText("하이라이트 기록됨")
+                self.record_button.setText('하이라이트 기록')
+                self.saved = False
+        except Exception as e:
+            logging.error(f"Error in record_highlight: {str(e)}")
+            QMessageBox.critical(self, "오류", f"하이라이트 기록 중 오류: {str(e)}")
 
     def delete_highlight(self):
-        selected_item = self.highlights_view.currentItem()
-        if not selected_item:
-            QMessageBox.information(self, "알림", "삭제할 하이라이트를 선택하세요.")
-            return
+        try:
+            selected_item = self.highlights_view.currentItem()
+            if not selected_item:
+                QMessageBox.information(self, "알림", "삭제할 하이라이트를 선택하세요.")
+                return
 
-        selected_index_in_view = self.highlights_view.row(selected_item)
-        highlight_list = self.current_highlight_list()
-        actual_highlight_index = -1
-        highlight_counter = 0
+            selected_index_in_view = self.highlights_view.row(selected_item)
+            highlight_list = self.current_highlight_list()
+            actual_highlight_index = -1
+            highlight_counter = 0
 
-        for i in range(self.highlights_view.count()):
-            if not self.highlights_view.item(i).text().startswith("==="):
-                if i == selected_index_in_view:
-                    actual_highlight_index = highlight_counter
-                    break
-                highlight_counter += 1
+            for i in range(self.highlights_view.count()):
+                if not self.highlights_view.item(i).text().startswith("==="):
+                    if i == selected_index_in_view:
+                        actual_highlight_index = highlight_counter
+                        break
+                    highlight_counter += 1
 
-        if 0 <= actual_highlight_index < len(highlight_list):
-            try:
+            if 0 <= actual_highlight_index < len(highlight_list):
                 del highlight_list[actual_highlight_index]
                 self.highlights_view.takeItem(selected_index_in_view)
                 self.saved = False
                 self.status_label.setText("하이라이트 삭제됨")
-            except Exception as e:
-                QMessageBox.critical(self, "삭제 오류", f"하이라이트 삭제 중 오류: {str(e)}")
-        else:
-            QMessageBox.warning(self, "오류", "선택된 하이라이트를 찾을 수 없습니다.")
+                logging.debug("Highlight deleted")
+            else:
+                QMessageBox.warning(self, "오류", "선택된 하이라이트를 찾을 수 없습니다.")
+                logging.warning("Could not find selected highlight to delete")
+        except Exception as e:
+            logging.error(f"Error in delete_highlight: {str(e)}")
+            QMessageBox.critical(self, "오류", f"하이라이트 삭제 중 오류: {str(e)}")
 
     def new_match(self):
-        self.match += 1
-        self.reset_timer()
-        self.highlights_by_match[self.match] = []
-        self.highlights_view.addItem(f"=== Match {self.match} ===")
-        self.status_label.setText(f"=== Match {self.match} ===")
+        try:
+            self.running = False
+            self.paused = False
+            self.timer.stop()
+            self.elapsed_time = 0
+            self.timer_label.setText("00:00")
+            self.highlight_start_time = None
+            self.record_button.setText('하이라이트 기록')
+            
+            self.match += 1
+            self.highlights_by_match[self.match] = []
+            self.highlights_view.addItem(f"=== Match {self.match} ===")
+            self.status_label.setText(f"=== Match {self.match} ===")
+            logging.debug(f"New match started: Match {self.match}")
+        except Exception as e:
+            logging.error(f"Error in new_match: {str(e)}")
+            QMessageBox.critical(self, "오류", f"새 매치 생성 중 오류: {str(e)}")
 
     def edit_match_number(self):
-        new_match, ok = QInputDialog.getInt(self, '매치 번호 수정', '새 매치 번호를 입력하세요:', value=self.match, min=1)
-        if ok:
-            self.match = new_match
-            self.highlights_by_match.setdefault(self.match, [])
-            self.status_label.setText(f"=== Match {self.match} ===")
+        try:
+            new_match, ok = QInputDialog.getInt(self, '매치 번호 수정', '새 매치 번호를 입력하세요:', value=self.match, min=1)
+            if ok:
+                self.match = new_match
+                self.highlights_by_match.setdefault(self.match, [])
+                self.status_label.setText(f"=== Match {self.match} ===")
+                logging.debug(f"Match number changed to {self.match}")
+        except Exception as e:
+            logging.error(f"Error in edit_match_number: {str(e)}")
+            QMessageBox.critical(self, "오류", f"매치 번호 수정 중 오류: {str(e)}")
 
     def edit_match_time(self):
-        if self.running:
-            new_time, ok = QInputDialog.getText(self, '매치 시간 수정', '새 경기 시간을 입력하세요 (MM:SS 형식):')
-            if ok and new_time:
-                try:
+        try:
+            if self.running:
+                new_time, ok = QInputDialog.getText(self, '매치 시간 수정', '새 경기 시간을 입력하세요 (MM:SS 형식):')
+                if ok and new_time:
                     minutes, seconds = map(int, new_time.split(':'))
                     self.elapsed_time = minutes * 60 + seconds
                     self.timer_label.setText(f"{minutes:02}:{seconds:02}")
                     self.status_label.setText("시간 수정됨")
-                except ValueError:
-                    QMessageBox.warning(self, '입력 오류', '올바른 형식(MM:SS)으로 입력하세요.')
+                    logging.debug(f"Match time edited to {minutes:02}:{seconds:02}")
+        except ValueError:
+            QMessageBox.warning(self, '입력 오류', '올바른 형식(MM:SS)으로 입력하세요.')
+            logging.warning("Invalid time format in edit_match_time")
+        except Exception as e:
+            logging.error(f"Error in edit_match_time: {str(e)}")
+            QMessageBox.critical(self, "오류", f"매치 시간 수정 중 오류: {str(e)}")
 
     def edit_highlight_inline(self, item):
-        new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=item.text())
-        if ok and new_text:
-            index = self.highlights_view.row(item)
-            item.setText(new_text)
-            self.saved = False
-            self.status_label.setText("하이라이트 수정됨")
+        try:
+            new_text, ok = QInputDialog.getText(self, '하이라이트 수정', '내용을 수정하세요:', text=item.text())
+            if ok and new_text:
+                index = self.highlights_view.row(item)
+                item.setText(new_text)
+                self.saved = False
+                self.status_label.setText("하이라이트 수정됨")
+                logging.debug("Highlight edited inline")
+        except Exception as e:
+            logging.error(f"Error in edit_highlight_inline: {str(e)}")
+            QMessageBox.critical(self, "오류", f"하이라이트 수정 중 오류: {str(e)}")
 
     def save_highlights(self):
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "메모 저장", "highlights.txt", "Text Files (*.txt)", options=options
-        )
-        if not file_path:
-            return
-
-        base = os.path.splitext(file_path)[0]
         try:
-            with open(base + '_memo.txt', 'w', encoding='utf-8') as f:
-                for m, lst in self.highlights_by_match.items():
-                    f.write(f"=== Match {m} ===\n\n")
-                    for h in lst:
-                        f.write(h.to_display_string() + '\n\n')
-        except PermissionError:
-            QMessageBox.critical(self, "저장 실패", "파일 쓰기 권한이 없습니다. 다른 위치에 저장해 보세요.")
-            return
-        except OSError as e:
-            QMessageBox.critical(self, "저장 실패", f"파일 저장 중 오류가 발생했습니다: {str(e)}")
-            return
+            saver = HighlightSaver(self)  # HighlightSaver 인스턴스 생성
+            success = saver.save_highlights(self.highlights_by_match)
+            if success:
+                self.saved = True
+                self.status_label.setText("파일 저장됨")
+                logging.debug("Highlights saved successfully")
         except Exception as e:
-            QMessageBox.critical(self, "저장 실패", f"예기치 않은 오류: {str(e)}")
-            return
-
-        for m, lst in self.highlights_by_match.items():
-            try:
-                root = Element("xmeml")
-                root.set("version", "4")
-                sequence = SubElement(root, "sequence", {
-                    "id": f"sequence_{m}",
-                    "TL.SQAudioVisibleBase": "0",
-                    "TL.SQVideoVisibleBase": "0",
-                    "TL.SQVisibleBaseTime": "0",
-                    "TL.SQAVDividerPosition": "0.5",
-                    "TL.SQHideShyTracks": "0",
-                    "TL.SQHeaderWidth": "292",
-                    "Monitor.ProgramZoomOut": "0",
-                    "Monitor.ProgramZoomIn": "0",
-                    "TL.SQTimePerPixel": "0.2",
-                    "MZ.EditLine": "0",
-                    "MZ.Sequence.PreviewFrameSizeHeight": "1080",
-                    "MZ.Sequence.PreviewFrameSizeWidth": "1920",
-                    "MZ.Sequence.AudioTimeDisplayFormat": "200",
-                    "MZ.Sequence.PreviewRenderingClassID": "1061109567",
-                    "MZ.Sequence.PreviewRenderingPresetCodec": "1634755439",
-                    "MZ.Sequence.PreviewRenderingPresetPath": "EncoderPresets/SequencePreview/795454d9-d3c2-429d-9474-923ab13b7018/QuickTime.epr",
-                    "MZ.Sequence.PreviewUseMaxRenderQuality": "false",
-                    "MZ.Sequence.PreviewUseMaxBitDepth": "false",
-                    "MZ.Sequence.EditingModeGUID": "795454d9-d3c2-429d-9474-923ab13b7018",
-                    "MZ.Sequence.VideoTimeDisplayFormat": "101",
-                    "MZ.WorkOutPoint": "4612930560000",
-                    "MZ.WorkInPoint": "0",
-                    "explodedTracks": "true"
-                })
-                SubElement(sequence, "uuid").text = str(uuid4())
-                max_duration = max((h.raw_end for h in lst), default=1)
-                SubElement(sequence, "duration").text = str(int(max_duration * 60))
-                rate = SubElement(sequence, "rate")
-                SubElement(rate, "timebase").text = "60"
-                SubElement(rate, "ntsc").text = "FALSE"
-                SubElement(sequence, "name").text = f"Marker - (Match {m})"
-                media = SubElement(sequence, "media")
-                video = SubElement(media, "video")
-                format_elem = SubElement(video, "format")
-                samplecharacteristics = SubElement(format_elem, "samplecharacteristics")
-                rate = SubElement(samplecharacteristics, "rate")
-                SubElement(rate, "timebase").text = "60"
-                SubElement(rate, "ntsc").text = "FALSE"
-                codec = SubElement(samplecharacteristics, "codec")
-                SubElement(codec, "name").text = "Apple ProRes 422"
-                appspecificdata = SubElement(codec, "appspecificdata")
-                SubElement(appspecificdata, "appname").text = "Final Cut Pro"
-                SubElement(appspecificdata, "appmanufacturer").text = "Apple Inc."
-                SubElement(appspecificdata, "appversion").text = "7.0"
-                data = SubElement(appspecificdata, "data")
-                qtcodec = SubElement(data, "qtcodec")
-                SubElement(qtcodec, "codecname").text = "Apple ProRes 422"
-                SubElement(qtcodec, "codectypename").text = "Apple ProRes 422"
-                SubElement(qtcodec, "codectypecode").text = "apcn"
-                SubElement(qtcodec, "codecvendorcode").text = "appl"
-                SubElement(qtcodec, "spatialquality").text = "1024"
-                SubElement(qtcodec, "temporalquality").text = "0"
-                SubElement(qtcodec, "keyframerate").text = "0"
-                SubElement(qtcodec, "datarate").text = "0"
-                SubElement(samplecharacteristics, "width").text = "1920"
-                SubElement(samplecharacteristics, "height").text = "1080"
-                SubElement(samplecharacteristics, "anamorphic").text = "FALSE"
-                SubElement(samplecharacteristics, "pixelaspectratio").text = "square"
-                SubElement(samplecharacteristics, "fielddominance").text = "none"
-                SubElement(samplecharacteristics, "colordepth").text = "24"
-                track = SubElement(video, "track", {
-                    "TL.SQTrackShy": "0",
-                    "TL.SQTrackExpandedHeight": "25",
-                    "TL.SQTrackExpanded": "0",
-                    "MZ.TrackTargeted": "0"
-                })
-                SubElement(track, "enabled").text = "TRUE"
-                SubElement(track, "locked").text = "FALSE"
-                generatoritem = SubElement(track, "generatoritem", {"id": f"generatoritem_{m}"})
-                SubElement(generatoritem, "name").text = f"Marker Color Matte (Match {m})"
-                SubElement(generatoritem, "enabled").text = "TRUE"
-                SubElement(generatoritem, "duration").text = str(int(max_duration * 60))
-                rate = SubElement(generatoritem, "rate")
-                SubElement(rate, "timebase").text = "60"
-                SubElement(rate, "ntsc").text = "FALSE"
-                SubElement(generatoritem, "start").text = "0"
-                SubElement(generatoritem, "end").text = str(int(max_duration * 60))
-                SubElement(generatoritem, "in").text = "0"
-                SubElement(generatoritem, "out").text = str(int(max_duration * 60))
-                SubElement(generatoritem, "alphatype").text = "none"
-                effect = SubElement(generatoritem, "effect")
-                SubElement(effect, "name").text = "Color"
-                SubElement(effect, "effectid").text = "Color"
-                SubElement(effect, "effectcategory").text = "Matte"
-                SubElement(effect, "effecttype").text = "generator"
-                SubElement(effect, "mediatype").text = "video"
-                parameter = SubElement(effect, "parameter", {"authoringApp": "PremierePro"})
-                SubElement(parameter, "parameterid").text = "fillcolor"
-                SubElement(parameter, "name").text = "Color"
-                value = SubElement(parameter, "value")
-                SubElement(value, "alpha").text = "0"
-                SubElement(value, "red").text = "0"
-                SubElement(value, "green").text = "0"
-                SubElement(value, "blue").text = "0"
-                filter = SubElement(generatoritem, "filter")
-                effect = SubElement(filter, "effect")
-                SubElement(effect, "name").text = "Opacity"
-                SubElement(effect, "effectid").text = "opacity"
-                SubElement(effect, "effectcategory").text = "motion"
-                SubElement(effect, "effecttype").text = "motion"
-                SubElement(effect, "mediatype").text = "video"
-                SubElement(effect, "pproBypass").text = "false"
-                parameter = SubElement(effect, "parameter", {"authoringApp": "PremierePro"})
-                SubElement(parameter, "parameterid").text = "opacity"
-                SubElement(parameter, "name").text = "opacity"
-                SubElement(parameter, "valuemin").text = "0"
-                SubElement(parameter, "valuemax").text = "100"
-                SubElement(parameter, "value").text = "0"
-                seen_in_values = set()
-                for i, h in enumerate(lst):
-                    in_value = int(h.raw_start * 60)
-                    out_value = int(h.raw_end * 60)
-                    if in_value >= out_value:
-                        print(f"Warning: Invalid marker range for highlight {i+1}: in={in_value}, out={out_value}")
-                        out_value = in_value + 60
-                    while in_value in seen_in_values:
-                        in_value += 1
-                        out_value += 1
-                    seen_in_values.add(in_value)
-                    marker = SubElement(generatoritem, "marker")
-                    SubElement(marker, "comment").text = h.memo
-                    SubElement(marker, "name").text = ""
-                    SubElement(marker, "in").text = str(in_value)
-                    SubElement(marker, "out").text = str(out_value)
-                    SubElement(marker, "pproColor").text = "4294741314"
-                timecode = SubElement(sequence, "timecode")
-                rate = SubElement(timecode, "rate")
-                SubElement(rate, "timebase").text = "60"
-                SubElement(rate, "ntsc").text = "FALSE"
-                SubElement(timecode, "string").text = "00:00:00:00"
-                SubElement(timecode, "frame").text = "0"
-                SubElement(timecode, "displayformat").text = "NDF"
-                labels = SubElement(sequence, "labels")
-                SubElement(labels, "label2").text = "Iris"
-                logginginfo = SubElement(sequence, "logginginfo")
-                SubElement(logginginfo, "description").text = ""
-                SubElement(logginginfo, "scene").text = ""
-                SubElement(logginginfo, "shottake").text = ""
-                SubElement(logginginfo, "lognote").text = ""
-                SubElement(logginginfo, "good").text = ""
-                SubElement(logginginfo, "originalvideofilename").text = ""
-                SubElement(logginginfo, "originalaudiofilename").text = ""
-                seen_in_values.clear()
-                for i, h in enumerate(lst):
-                    in_value = int(h.raw_start * 60)
-                    out_value = int(h.raw_end * 60)
-                    if in_value >= out_value:
-                        print(f"Warning: Invalid marker range for highlight {i+1}: in={in_value}, out={out_value}")
-                        out_value = in_value + 60
-                    while in_value in seen_in_values:
-                        in_value += 1
-                        out_value += 1
-                    seen_in_values.add(in_value)
-                    marker = SubElement(sequence, "marker")
-                    SubElement(marker, "comment").text = h.memo
-                    SubElement(marker, "name").text = ""
-                    SubElement(marker, "in").text = str(in_value)
-                    SubElement(marker, "out").text = str(out_value)
-                    SubElement(marker, "pproColor").text = "4294741314"
-                xml_str = minidom.parseString(tostring(root)).toprettyxml(indent="  ")
-                xml_path = f"{base}_markers_match_{m}.xml"
-                with open(xml_path, "w", encoding="utf-8") as f:
-                    f.write(xml_str)
-            except PermissionError:
-                QMessageBox.critical(self, "XML 저장 실패", f"Match {m} XML 파일 쓰기 권한이 없습니다.")
-                return
-            except OSError as e:
-                QMessageBox.critical(self, "XML 저장 실패", f"Match {m} XML 파일 저장 중 오류: {str(e)}")
-                return
-            except Exception as e:
-                QMessageBox.critical(self, "XML 저장 실패", f"Match {m} XML 저장 중 예기치 않은 오류: {str(e)}")
-                return
-
-        QMessageBox.information(self, "저장 완료", "모든 하이라이트가 성공적으로 저장되었습니다.")
-        self.saved = True
-        self.status_label.setText("파일 저장됨")
+            logging.error(f"Error in save_highlights: {str(e)}")
+            QMessageBox.critical(self, "저장 실패", f"하이라이트 저장 중 오류: {str(e)}")
 
     def auto_save_highlights(self):
-        if not self.highlights_by_match:
-            return
         try:
+            if not self.highlights_by_match:
+                return
             os.makedirs('autosaves', exist_ok=True)
             with open('autosaves/highlights_autosave.txt', 'w', encoding='utf-8') as f:
                 for m, lst in self.highlights_by_match.items():
                     for h in lst:
                         f.write(h.to_display_string() + '\n')
+            logging.debug("Auto-save completed")
         except Exception as e:
-            print(f"Auto-save failed: {str(e)}")  # Log error instead of showing dialog to avoid interrupting user
+            logging.error(f"Auto-save failed: {str(e)}")
 
     def closeEvent(self, event):
-        if not any(self.highlights_by_match.values()) or self.saved:
-            event.accept()
-            return
+        try:
+            if not any(self.highlights_by_match.values()) or self.saved:
+                event.accept()
+                return
 
-        reply = QMessageBox.question(self, '종료 확인',
-                                     '하이라이트가 저장되지 않았습니다. 저장 후 종료하시겠습니까?',
-                                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
-        if reply == QMessageBox.Yes:
-            self.save_highlights()
-            event.accept()
-        elif reply == QMessageBox.No:
-            event.accept()
-        else:
-            event.ignore()
+            reply = QMessageBox.question(self, '종료 확인',
+                                        '하이라이트가 저장되지 않았습니다. 저장 후 종료하시겠습니까?',
+                                        QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel)
+            if reply == QMessageBox.Yes:
+                self.save_highlights()
+                event.accept()
+            elif reply == QMessageBox.No:
+                event.accept()
+            else:
+                event.ignore()
+            logging.debug("Close event handled")
+        except Exception as e:
+            logging.error(f"Error in closeEvent: {str(e)}")
+            QMessageBox.critical(self, "오류", f"프로그램 종료 중 오류: {str(e)}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
