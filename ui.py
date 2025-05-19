@@ -70,6 +70,12 @@ class HighlightRecorderUI(QWidget):
             delete_shortcut.activated.connect(self.callbacks['delete_highlight'])
             self.logger.debug("Delete shortcut registered")
 
+            # Ctrl+S 단축키
+            self.logger.debug("Registering Ctrl+S shortcut")
+            save_shortcut = QShortcut(QKeySequence('Ctrl+S'), self)
+            save_shortcut.activated.connect(self.callbacks['save_highlights'])
+            self.logger.debug("Ctrl+S shortcut registered")
+
             self.setLayout(layout)
             self.setFixedSize(400, 800)
         except Exception as e:
