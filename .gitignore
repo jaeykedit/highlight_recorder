@@ -28,3 +28,4 @@ autosave/
 *.idea/
 *.vscode/
 *.sublime-project
+autosaves/

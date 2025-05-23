@@ -70,3 +70,20 @@ class TimerManager:
 
     def get_elapsed_time(self):
         return self.elapsed_time
+
+    def get_state(self):
+        return {
+            'running': self.running,
+            'paused': self.paused,
+            'elapsed_time': self.elapsed_time
+        }
+
+    def restore_state(self, state):
+        self.running = state.get('running', False)
+        self.paused = state.get('paused', False)
+        self.elapsed_time = state.get('elapsed_time', 0)
+        if self.elapsed_time > 0:
+            minutes = self.elapsed_time // 60
+            seconds = self.elapsed_time % 60
+            self.update_callback(minutes, seconds)
+        self.logger.debug("Timer state restored: %s", state)

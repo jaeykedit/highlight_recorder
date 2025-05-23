@@ -76,6 +76,18 @@ class HighlightRecorderUI(QWidget):
             save_shortcut.activated.connect(self.callbacks['save_highlights'])
             self.logger.debug("Ctrl+S shortcut registered")
 
+            # Ctrl+Z 단축키 (Undo)
+            self.logger.debug("Registering Ctrl+Z shortcut")
+            undo_shortcut = QShortcut(QKeySequence('Ctrl+Z'), self)
+            undo_shortcut.activated.connect(self.callbacks['undo'])
+            self.logger.debug("Ctrl+Z shortcut registered")
+
+            # Ctrl+Shift+Z 단축키 (Redo)
+            self.logger.debug("Registering Ctrl+Shift+Z shortcut")
+            redo_shortcut = QShortcut(QKeySequence('Ctrl+Shift+Z'), self)
+            redo_shortcut.activated.connect(self.callbacks['redo'])
+            self.logger.debug("Ctrl+Shift+Z shortcut registered")
+
             self.setLayout(layout)
             self.setFixedSize(400, 800)
         except Exception as e:

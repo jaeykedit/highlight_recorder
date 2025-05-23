@@ -1,11 +1,13 @@
 import sys
 import logging
+import atexit
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from ui import HighlightRecorderUI
 from timer import TimerManager
 from highlight import HighlightManager
 from save import SaveManager
+from commands import CommandManager
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -19,6 +21,7 @@ class HighlightRecorderApp:
             self.timer_manager = TimerManager(self.update_timer_callback)
             self.highlight_manager = HighlightManager()
             self.save_manager = SaveManager(None)
+            self.command_manager = CommandManager()
             callbacks = {
                 'start_match': self.start_match,
                 'toggle_timer': self.toggle_timer,
@@ -28,10 +31,14 @@ class HighlightRecorderApp:
                 'delete_highlight': self.delete_highlight,
                 'edit_highlight': self.edit_highlight_inline,
                 'save_highlights': self.save_highlights,
+                'undo': self.undo,
+                'redo': self.redo,
             }
             self.ui = HighlightRecorderUI(callbacks)
             self.save_manager.parent = self.ui
             self.ui.closeEvent = self.close_event
+            atexit.register(self.save_session)
+            self.load_session()
             self.logger.debug("HighlightRecorderApp initialized successfully")
         except Exception as e:
             print(f"Error initializing HighlightRecorderApp: {str(e)}")
@@ -85,8 +92,9 @@ class HighlightRecorderApp:
                     self.ui.memo_input.setFocus()
             else:
                 memo = self.ui.get_memo()
-                message = self.highlight_manager.stop_recording(current_time, memo)
-                if message:
+                command, message = self.highlight_manager.stop_recording(current_time, memo)
+                if command and message:
+                    self.command_manager.execute(command)
                     self.ui.update_status(message)
                     self.ui.record_button.setText('하이라이트 기록')
                     self.ui.clear_memo()
@@ -105,10 +113,12 @@ class HighlightRecorderApp:
             if index == -1:
                 self.ui.show_info("알림", "삭제할 하이라이트를 선택하세요.")
                 return
-            message = self.highlight_manager.delete(index)
-            self.ui.update_status(message)
-            self.ui.update_highlights_view(self.highlight_manager.get_highlights())
-            self.save_manager.saved = False
+            command, message = self.highlight_manager.delete(index)
+            if command and message:
+                self.command_manager.execute(command)
+                self.ui.update_status(message)
+                self.ui.update_highlights_view(self.highlight_manager.get_highlights())
+                self.save_manager.saved = False
         except ValueError as e:
             self.logger.warning(str(e))
             self.ui.show_warning("오류", str(e))
@@ -118,8 +128,9 @@ class HighlightRecorderApp:
 
     def edit_match_time(self):
         try:
-            message = self.timer_manager.edit_time(self.ui)
-            if message:
+            command, message = self.timer_manager.edit_time(self.ui, self.ui)
+            if command and message:
+                self.command_manager.execute(command)
                 self.ui.update_status(message)
         except ValueError as e:
             self.logger.warning(str(e))
@@ -134,10 +145,12 @@ class HighlightRecorderApp:
             if index == -1:
                 self.ui.show_info("알림", "수정할 하이라이트를 선택하세요.")
                 return
-            message = self.highlight_manager.edit(index, self.ui)
-            self.ui.update_status(message)
-            self.ui.update_highlights_view(self.highlight_manager.get_highlights())
-            self.save_manager.saved = False
+            command, message = self.highlight_manager.edit(index, self.ui)
+            if command and message:
+                self.command_manager.execute(command)
+                self.ui.update_status(message)
+                self.ui.update_highlights_view(self.highlight_manager.get_highlights())
+                self.save_manager.saved = False
         except ValueError as e:
             self.logger.warning(str(e))
             self.ui.show_warning("입력 오류", str(e))
@@ -156,8 +169,67 @@ class HighlightRecorderApp:
             self.logger.error(f"Error in save_highlights: {str(e)}")
             self.ui.show_error(f"하이라이트 저장 중 오류: {str(e)}")
 
+    def undo(self):
+        try:
+            if self.command_manager.undo():
+                self.ui.update_highlights_view(self.highlight_manager.get_highlights())
+                self.ui.update_status("실행 취소됨")
+                self.save_manager.saved = False
+            else:
+                self.ui.update_status("취소할 작업이 없습니다")
+        except Exception as e:
+            self.logger.error(f"Error in undo: {str(e)}")
+            self.ui.show_error(f"실행 취소 중 오류: {str(e)}")
+
+    def redo(self):
+        try:
+            if self.command_manager.redo():
+                self.ui.update_highlights_view(self.highlight_manager.get_highlights())
+                self.ui.update_status("다시 실행됨")
+                self.save_manager.saved = False
+            else:
+                self.ui.update_status("다시 실행할 작업이 없습니다")
+        except Exception as e:
+            self.logger.error(f"Error in redo: {str(e)}")
+            self.ui.show_error(f"다시 실행 중 오류: {str(e)}")
+
+    def save_session(self):
+        try:
+            timer_state = self.timer_manager.get_state()
+            highlights = self.highlight_manager.get_highlights()
+            memo = self.ui.get_memo()
+            self.save_manager.save_session(timer_state, highlights, memo)
+        except Exception as e:
+            self.logger.error(f"Error saving session: {str(e)}")
+
+    def load_session(self):
+        try:
+            session_data = self.save_manager.load_session()
+            if not session_data:
+                return
+            # 타이머 복원
+            timer_data = session_data.get('timer', {})
+            self.timer_manager.restore_state(timer_data)
+            if timer_data.get('running', False) and not timer_data.get('paused', False):
+                self.timer_manager.start()
+                self.ui.pause_button.setText('타이머 일시정지')
+            elif timer_data.get('paused', False):
+                self.ui.pause_button.setText('타이머 재개')
+            # 하이라이트 복원
+            highlights = session_data.get('highlights', [])
+            self.highlight_manager.restore_highlights(highlights)
+            self.ui.update_highlights_view(highlights)
+            # 메모 복원
+            memo = session_data.get('memo', '')
+            self.ui.memo_input.setText(memo)
+            self.ui.update_status("이전 세션 복구됨")
+        except Exception as e:
+            self.logger.error(f"Error loading session: {str(e)}")
+            self.ui.show_warning("세션 복구 실패", "세션 복구에 실패했습니다. 새 세션으로 시작합니다.")
+
     def close_event(self, event):
         try:
+            self.save_session()
             if self.save_manager.check_unsaved(self.highlight_manager.get_highlights()):
                 event.accept()
             else:
