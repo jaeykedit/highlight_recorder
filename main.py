@@ -49,17 +49,18 @@ class HighlightRecorderApp:
 
     def handle_session_choice(self) -> bool:
         try:
-            if os.path.exists('autosaves/session.json'):
-                choice = self.ui.ask_session_restore()
-                if choice == "restore":
-                    self.load_session()
-                elif choice == "new":
-                    self.save_manager.clear_session()
-                    self.ui.update_status("새 세션 시작")
-                elif choice == "cancel":
-                    return False
-            else:
+            sessions = self.save_manager.list_sessions()
+            if not sessions:
                 self.ui.update_status("새 세션 시작")
+                return True
+            choice = self.ui.show_session_selector(sessions)
+            if choice == "new":
+                self.save_manager.clear_session()
+                self.ui.update_status("새 세션 시작")
+            elif choice == "cancel":
+                return False
+            else:
+                self.load_session(choice)
             return True
         except Exception as e:
             self.logger.error(f"Error handling session choice: {str(e)}")
@@ -224,10 +225,11 @@ class HighlightRecorderApp:
         except Exception as e:
             self.logger.error(f"Error saving session: {str(e)}")
 
-    def load_session(self):
+    def load_session(self, session_file: str):
         try:
-            session_data = self.save_manager.load_session()
+            session_data = self.save_manager.load_session(session_file)
             if not session_data:
+                self.ui.update_status("새 세션 시작")
                 return
             # 타이머 복원
             timer_data = session_data.get('timer', {})
@@ -244,7 +246,7 @@ class HighlightRecorderApp:
             # 메모 복원
             memo = session_data.get('memo', '')
             self.ui.memo_input.setText(memo)
-            self.ui.update_status("이전 세션 복구됨")
+            self.ui.update_status("세션 복구됨")
         except Exception as e:
             self.logger.error(f"Error loading session: {str(e)}")
             self.ui.show_warning("세션 복구 실패", "세션 복구에 실패했습니다. 새 세션으로 시작합니다.")

@@ -1,7 +1,8 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QListWidget, QMessageBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel, QListWidget, QMessageBox, QDialog, QDialogButtonBox
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
+from typing import List, Dict, Any
 import logging
 
 class HighlightRecorderUI(QWidget):
@@ -93,6 +94,63 @@ class HighlightRecorderUI(QWidget):
         except Exception as e:
             self.logger.error(f"Error in init_ui: {str(e)}")
             raise
+
+    def show_session_selector(self, sessions: List[Dict[str, Any]]) -> str:
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("세션 선택")
+            layout = QVBoxLayout()
+
+            label = QLabel("복구할 세션을 선택하세요:", dialog)
+            layout.addWidget(label)
+
+            session_list = QListWidget(dialog)
+            for session in sessions:
+                timestamp = session['timestamp'].split('T')[0] + ' ' + session['timestamp'].split('T')[1][:8]
+                total_time = session['total_time']
+                time_str = f"{total_time // 60:02}:{total_time % 60:02}"
+                item_text = f"{timestamp} | {session['highlight_count']} 하이라이트 | {time_str}"
+                session_list.addItem(item_text)
+            session_list.setCurrentRow(0)
+            layout.addWidget(session_list)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, dialog)
+            new_session_button = QPushButton("새 세션", dialog)
+            buttons.addButton(new_session_button, QDialogButtonBox.ActionRole)
+            layout.addWidget(buttons)
+
+            selected_session = None
+
+            def on_ok():
+                nonlocal selected_session
+                if session_list.currentRow() >= 0:
+                    selected_session = sessions[session_list.currentRow()]['file']
+                dialog.accept()
+
+            def on_new_session():
+                nonlocal selected_session
+                selected_session = "new"
+                dialog.accept()
+
+            buttons.accepted.connect(on_ok)
+            buttons.rejected.connect(dialog.reject)
+            new_session_button.clicked.connect(on_new_session)
+
+            dialog.setLayout(layout)
+            result = dialog.exec_()
+
+            if result == QDialog.Accepted:
+                if selected_session == "new":
+                    self.logger.debug("User chose to start new session")
+                    return "new"
+                elif selected_session:
+                    self.logger.debug("User selected session: %s", selected_session)
+                    return selected_session
+            self.logger.debug("User cancelled session selection")
+            return "cancel"
+        except Exception as e:
+            self.logger.error(f"Error in show_session_selector: {str(e)}")
+            return "cancel"
 
     def ask_session_restore(self) -> str:
         try:
