@@ -94,6 +94,28 @@ class HighlightRecorderUI(QWidget):
             self.logger.error(f"Error in init_ui: {str(e)}")
             raise
 
+    def ask_session_restore(self) -> str:
+        try:
+            reply = QMessageBox.question(
+                self,
+                '세션 복구',
+                '이전 세션을 복구하시겠습니까?',
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                self.logger.debug("User chose to restore previous session")
+                return "restore"
+            elif reply == QMessageBox.No:
+                self.logger.debug("User chose to start new session")
+                return "new"
+            else:
+                self.logger.debug("User cancelled session selection")
+                return "cancel"
+        except Exception as e:
+            self.logger.error(f"Error in ask_session_restore: {str(e)}")
+            return "cancel"
+
     @pyqtSlot(str)
     def show_error(self, message):
         QMessageBox.critical(self, "오류", message)

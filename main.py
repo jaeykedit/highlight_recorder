@@ -8,6 +8,7 @@ from timer import TimerManager
 from highlight import HighlightManager
 from save import SaveManager
 from commands import CommandManager
+import os
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,11 +39,32 @@ class HighlightRecorderApp:
             self.save_manager.parent = self.ui
             self.ui.closeEvent = self.close_event
             atexit.register(self.save_session)
-            self.load_session()
+            if not self.handle_session_choice():
+                self.logger.debug("Application startup cancelled")
+                sys.exit(0)
             self.logger.debug("HighlightRecorderApp initialized successfully")
         except Exception as e:
             print(f"Error initializing HighlightRecorderApp: {str(e)}")
             raise
+
+    def handle_session_choice(self) -> bool:
+        try:
+            if os.path.exists('autosaves/session.json'):
+                choice = self.ui.ask_session_restore()
+                if choice == "restore":
+                    self.load_session()
+                elif choice == "new":
+                    self.save_manager.clear_session()
+                    self.ui.update_status("새 세션 시작")
+                elif choice == "cancel":
+                    return False
+            else:
+                self.ui.update_status("새 세션 시작")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error handling session choice: {str(e)}")
+            self.ui.show_error(f"세션 선택 중 오류: {str(e)}")
+            return False
 
     def update_timer_callback(self, minutes, seconds):
         self.ui.update_timer_display(minutes, seconds)
