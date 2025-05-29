@@ -15,6 +15,7 @@ class SaveManager:
         self.logger = logging.getLogger(__name__)
         self.saver = HighlightSaver(parent)
         self.session_dir = 'autosaves/sessions'
+        self.settings_file = 'autosaves/settings.json'
         self.max_sessions = 10
 
     def save(self, highlights: List[Highlight]) -> str:
@@ -150,3 +151,27 @@ class SaveManager:
             self.saved = False
         except Exception as e:
             self.logger.error(f"Error clearing sessions: {str(e)}")
+
+    def save_theme(self, theme: str):
+        try:
+            os.makedirs('autosaves', exist_ok=True)
+            settings = {'theme': theme}
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            self.logger.debug("Theme settings saved to %s", self.settings_file)
+        except Exception as e:
+            self.logger.error(f"Failed to save theme: {str(e)}")
+
+    def load_theme(self) -> str:
+        try:
+            if not os.path.exists(self.settings_file):
+                self.logger.debug("No theme settings found")
+                return "light"
+            with open(self.settings_file, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            theme = settings.get('theme', 'light')
+            self.logger.debug("Theme loaded: %s", theme)
+            return theme
+        except Exception as e:
+            self.logger.error(f"Failed to load theme: {str(e)}")
+            return "light"

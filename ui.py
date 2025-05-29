@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLineEdit, QLabel
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 
 class HighlightRecorderUI(QWidget):
@@ -12,7 +12,9 @@ class HighlightRecorderUI(QWidget):
             self.logger = logging.getLogger(__name__)
             self.logger.debug("HighlightRecorderUI initializing")
             self.callbacks = callbacks
+            self.current_theme = 'light'
             self.init_ui()
+            self.apply_theme()
             self.logger.debug("HighlightRecorderUI initialized successfully")
         except Exception as e:
             print(f"Error initializing HighlightRecorderUI: {str(e)}")
@@ -51,6 +53,7 @@ class HighlightRecorderUI(QWidget):
                 ('edit_time_button', '타이머 시간 수정', self.callbacks['edit_match_time']),
                 ('delete_button', '하이라이트 삭제', self.callbacks['delete_highlight']),
                 ('save_button', '메모 저장', self.callbacks['save_highlights']),
+                ('theme_button', '테마 변경', self.toggle_theme),
             ]
             for name, text, callback in buttons:
                 button = QPushButton(text, self)
@@ -90,10 +93,40 @@ class HighlightRecorderUI(QWidget):
             self.logger.debug("Ctrl+Shift+Z shortcut registered")
 
             self.setLayout(layout)
-            self.setFixedSize(400, 800)
+            self.setMinimumSize(300, 600)
         except Exception as e:
             self.logger.error(f"Error in init_ui: {str(e)}")
             raise
+
+    def toggle_theme(self):
+        try:
+            self.current_theme = 'dark' if self.current_theme == 'light' else 'light'
+            self.apply_theme()
+            self.callbacks['save_theme']()
+            self.logger.debug("Theme toggled to %s", self.current_theme)
+        except Exception as e:
+            self.logger.error(f"Error toggling theme: {str(e)}")
+            self.show_error(f"테마 변경 오류: {str(e)}")
+
+    def apply_theme(self):
+        try:
+            if self.current_theme == 'dark':
+                self.setStyleSheet("""
+                    QWidget { background-color: #2E2E2E; color: #FFFFFF; }
+                    QPushButton { background-color: #4A4A4A; color: #FFFFFF; border: 1px solid #555555; }
+                    QPushButton:hover { background-color: #5A5A5A; }
+                    QLineEdit { background-color: #3A3A3A; color: #FFFFFF; border: 1px solid #555555; }
+                    QListWidget { background-color: #3A3A3A; color: #FFFFFF; border: 1px solid #555555; }
+                    QLabel { color: #FFFFFF; }
+                """)
+                self.status_label.setStyleSheet("font-size: 14px; color: #00FF00;")
+            else:
+                self.setStyleSheet("")
+                self.status_label.setStyleSheet("font-size: 14px; color: green;")
+            self.logger.debug("Applied %s theme", self.current_theme)
+        except Exception as e:
+            self.logger.error(f"Error applying theme: {str(e)}")
+            self.show_error(f"테마 적용 오류: {str(e)}")
 
     def show_session_selector(self, sessions: List[Dict[str, Any]]) -> str:
         try:
@@ -173,6 +206,15 @@ class HighlightRecorderUI(QWidget):
         except Exception as e:
             self.logger.error(f"Error in ask_session_restore: {str(e)}")
             return "cancel"
+
+    def update_recording_status(self, status: Optional[Dict[str, Any]]):
+        try:
+            if status:
+                self.status_label.setText(f"기록 중: {status['start']} ~ {status['end']} ({status['duration']}초)")
+            else:
+                self.status_label.setText("")
+        except Exception as e:
+            self.logger.error(f"Error updating recording status: {str(e)}")
 
     @pyqtSlot(str)
     def show_error(self, message):

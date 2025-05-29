@@ -23,6 +23,7 @@ class HighlightRecorderApp:
             self.highlight_manager = HighlightManager()
             self.save_manager = SaveManager(None)
             self.command_manager = CommandManager()
+            self.session_saved = False  # 세션 저장 플래그 추가
             callbacks = {
                 'start_match': self.start_match,
                 'toggle_timer': self.toggle_timer,
@@ -34,9 +35,12 @@ class HighlightRecorderApp:
                 'save_highlights': self.save_highlights,
                 'undo': self.undo,
                 'redo': self.redo,
+                'save_theme': self.save_theme,
             }
             self.ui = HighlightRecorderUI(callbacks)
             self.save_manager.parent = self.ui
+            self.ui.current_theme = self.save_manager.load_theme()
+            self.ui.apply_theme()
             self.ui.closeEvent = self.close_event
             atexit.register(self.save_session)
             if not self.handle_session_choice():
@@ -67,8 +71,10 @@ class HighlightRecorderApp:
             self.ui.show_error(f"세션 선택 중 오류: {str(e)}")
             return False
 
-    def update_timer_callback(self, minutes, seconds):
+    def update_timer_callback(self, minutes: int, seconds: int, elapsed_time: int):
         self.ui.update_timer_display(minutes, seconds)
+        status = self.highlight_manager.get_recording_status(elapsed_time)
+        self.ui.update_recording_status(status)
 
     def start_match(self):
         try:
@@ -214,14 +220,19 @@ class HighlightRecorderApp:
                 self.ui.update_status("다시 실행할 작업이 없습니다")
         except Exception as e:
             self.logger.error(f"Error in redo: {str(e)}")
-            self.ui.show_error(f"다시 실행 중 오류: {str(e)}")
+            self.ui.show_error(f"실행 취소 중 오류: {str(e)}")
 
     def save_session(self):
         try:
+            if self.session_saved:
+                self.logger.debug("Session already saved, skipping")
+                return
             timer_state = self.timer_manager.get_state()
             highlights = self.highlight_manager.get_highlights()
             memo = self.ui.get_memo()
             self.save_manager.save_session(timer_state, highlights, memo)
+            self.session_saved = True
+            self.logger.debug("Session saved successfully")
         except Exception as e:
             self.logger.error(f"Error saving session: {str(e)}")
 
@@ -230,15 +241,18 @@ class HighlightRecorderApp:
             session_data = self.save_manager.load_session(session_file)
             if not session_data:
                 self.ui.update_status("새 세션 시작")
+                self.logger.warning("No valid session data found for %s", session_file)
                 return
             # 타이머 복원
             timer_data = session_data.get('timer', {})
             self.timer_manager.restore_state(timer_data)
+            # 버튼 상태 업데이트
             if timer_data.get('running', False) and not timer_data.get('paused', False):
-                self.timer_manager.start()
                 self.ui.pause_button.setText('타이머 일시정지')
             elif timer_data.get('paused', False):
                 self.ui.pause_button.setText('타이머 재개')
+            else:
+                self.ui.pause_button.setText('타이머 일시정지')
             # 하이라이트 복원
             highlights = session_data.get('highlights', [])
             self.highlight_manager.restore_highlights(highlights)
@@ -247,9 +261,22 @@ class HighlightRecorderApp:
             memo = session_data.get('memo', '')
             self.ui.memo_input.setText(memo)
             self.ui.update_status("세션 복구됨")
+            self.logger.debug("Session loaded successfully: %s", session_file)
         except Exception as e:
             self.logger.error(f"Error loading session: {str(e)}")
-            self.ui.show_warning("세션 복구 실패", "세션 복구에 실패했습니다. 새 세션으로 시작합니다.")
+            self.ui.show_warning("세션 복구 실패", f"세션 복구에 실패했습니다: {str(e)}. 새 세션으로 시작합니다.")
+            self.timer_manager.reset()
+            self.highlight_manager.restore_highlights([])
+            self.ui.update_highlights_view([])
+            self.ui.memo_input.clear()
+            self.ui.update_status("새 세션 시작")
+
+    def save_theme(self):
+        try:
+            self.save_manager.save_theme(self.ui.current_theme)
+        except Exception as e:
+            self.logger.error(f"Error saving theme: {str(e)}")
+            self.ui.show_error(f"테마 저장 오류: {str(e)}")
 
     def close_event(self, event):
         try:
